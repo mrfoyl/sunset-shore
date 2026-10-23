@@ -1,0 +1,1386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sunset Shore</title>
+<meta name="description" content="A live, simulated tropical beach that plays a full sunset or sunrise in real time.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: the scene fills the screen; one glass panel slides out from the palm grove on the left. */
+:root {
+  --ink: #fbeee6;
+  --ink-dim: #c9b3c4;
+  --glass: rgba(28, 14, 34, 0.62);
+  --line: rgba(255, 214, 196, 0.18);
+  --ember: #ffb36b;
+  --coral: #ff6f7d;
+  --dusk: #7c5cff;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden; background: #0b0610; color: var(--ink);
+  font-family: var(--font-display); -webkit-font-smoothing: antialiased;
+}
+body.idle, body.idle * { cursor: none !important; }
+#scene, #fg, #veg, #fg2 { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#fg, #veg, #fg2 { pointer-events: none; }
+
+#coco {
+  position: fixed; left: 0; top: 0; width: 64px; height: 64px; margin: -32px 0 0 -32px;
+  border: 0; border-radius: 50%; background: transparent; cursor: pointer; z-index: 5;
+  transition: box-shadow .4s ease, background .4s ease;
+}
+#coco:hover, #coco:focus-visible {
+  background: radial-gradient(circle, rgba(255,190,120,.28), rgba(255,190,120,0) 70%);
+  box-shadow: 0 0 0 1px rgba(255,214,196,.25);
+  outline: none;
+}
+
+#hint {
+  position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  font: 500 13px/1.3 var(--font-mono); color: var(--ink-dim); letter-spacing: .02em;
+  background: var(--glass); border: 1px solid var(--line); padding: 8px 12px; border-radius: 999px;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  transition: opacity 1.2s ease; z-index: 4;
+}
+#hint.gone { opacity: 0; pointer-events: none; }
+
+#panel {
+  position: fixed; z-index: 10;
+  top: calc(16px + env(safe-area-inset-top, 0px));
+  left: max(16px, env(safe-area-inset-left, 0px));
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100% - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  overflow-y: auto; box-sizing: border-box;
+  padding: 22px 22px 20px;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 22px;
+  backdrop-filter: blur(18px) saturate(1.3); -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  box-shadow: 0 30px 80px rgba(10, 0, 20, .45);
+  display: grid; gap: 18px;
+  transform-origin: 20% 0;
+  transition: opacity .35s ease, transform .45s cubic-bezier(.2,.8,.2,1);
+}
+#panel.closed { opacity: 0; transform: translateY(-8px) scale(.97); pointer-events: none; visibility: hidden; }
+
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.head h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-dim); }
+.clock { font: 500 54px/1 var(--font-mono); letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin-top: 10px; }
+.clock small { font-size: 20px; color: var(--ink-dim); }
+.phase { margin-top: 8px; font-size: 18px; font-weight: 600; text-wrap: balance; }
+.sub { margin-top: 4px; font: 400 13px/1.4 var(--font-mono); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+.iconbtn {
+  flex: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line);
+  background: transparent; color: var(--ink); font-size: 18px; line-height: 1; cursor: pointer;
+}
+.iconbtn:hover { background: rgba(255,255,255,.08); }
+.iconbtn:focus-visible, .seg button:focus-visible, .chips button:focus-visible, .btn:focus-visible, select:focus-visible {
+  outline: 2px solid var(--ember); outline-offset: 2px;
+}
+
+.field { display: grid; gap: 8px; }
+.label { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-dim); }
+.label output { font: 500 12px var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: rgba(0,0,0,.25); border-radius: 12px; padding: 4px; gap: 4px; }
+.seg button, .chips button {
+  border: 0; border-radius: 9px; padding: 9px 8px; background: transparent; color: var(--ink-dim);
+  font: 600 14px var(--font-display); cursor: pointer;
+}
+.seg button[aria-pressed="true"], .chips button[aria-pressed="true"] {
+  background: linear-gradient(135deg, var(--ember), var(--coral)); color: #2a0d18;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { background: rgba(0,0,0,.25); padding: 7px 11px; font: 500 13px var(--font-mono); }
+
+input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 26px; background: transparent; margin: 0; cursor: pointer; }
+input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 6px; background: var(--track, rgba(255,255,255,.18)); }
+input[type=range]::-moz-range-track { height: 6px; border-radius: 6px; background: var(--track, rgba(255,255,255,.18)); }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -7px; border-radius: 50%; background: var(--ink); border: 3px solid #2a0d18; box-shadow: 0 0 0 1px var(--line); }
+input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--ink); border: 3px solid #2a0d18; }
+input[type=range]:focus-visible { outline: 2px solid var(--ember); outline-offset: 4px; border-radius: 6px; }
+#pos { height: 34px; }
+#pos::-webkit-slider-runnable-track { height: 14px; border-radius: 8px; }
+#pos::-moz-range-track { height: 14px; border-radius: 8px; }
+#pos::-webkit-slider-thumb { width: 8px; height: 30px; margin-top: -8px; border-radius: 4px; border: 2px solid #2a0d18; }
+#pos::-moz-range-thumb { width: 4px; height: 26px; border-radius: 4px; }
+.ticks { display: flex; justify-content: space-between; font: 400 11px var(--font-mono); color: var(--ink-dim); margin-top: -2px; }
+
+select {
+  width: 100%; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: rgba(0,0,0,.3); color: var(--ink); font: 500 14px var(--font-display);
+}
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.row > * { min-width: 0; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  flex: 1 1 auto; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px;
+  background: rgba(255,255,255,.06); color: var(--ink); font: 600 14px var(--font-display); cursor: pointer;
+}
+.btn:hover { background: rgba(255,255,255,.12); }
+.btn.primary { background: linear-gradient(135deg, var(--ember), var(--coral)); color: #2a0d18; border-color: transparent; }
+.keys { font: 400 11px/1.6 var(--font-mono); color: var(--ink-dim); }
+.check { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: center; cursor: pointer;
+  padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.25); }
+.check input { width: 18px; height: 18px; margin: 0; accent-color: var(--ember); cursor: pointer; }
+.check span { font-size: 15px; font-weight: 600; }
+.check small { grid-column: 2; font: 400 12px/1.4 var(--font-mono); color: var(--ink-dim); }
+.check input:focus-visible { outline: 2px solid var(--ember); outline-offset: 2px; }
+.locked { opacity: .4; pointer-events: none; }
+.keys kbd { font: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+#err { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; font-size: 18px; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { #panel, #hint { transition: none; } }
+</style>
+
+<canvas id="scene" aria-label="Animated tropical beach at sunset"></canvas>
+<canvas id="fg" aria-hidden="true"></canvas>
+<canvas id="veg" aria-hidden="true"></canvas>
+<canvas id="fg2" aria-hidden="true"></canvas>
+<button id="coco" aria-label="Open settings" title="Settings"></button>
+<div id="hint">Click the coconuts in the tall palm for settings</div>
+<div id="err" hidden></div>
+
+<aside id="panel" class="closed" aria-label="Settings">
+  <div class="head">
+    <div>
+      <h1>Sunset Shore</h1>
+      <div class="clock" id="clock">18:00<small>:00</small></div>
+      <div class="phase" id="phase">Sunset</div>
+      <div class="sub" id="sub">at sunset · sun 0.0°</div>
+    </div>
+    <button class="iconbtn" id="close" aria-label="Close settings">✕</button>
+  </div>
+
+  <label class="check" for="linked">
+    <input type="checkbox" id="linked">
+    <span>Follow the local clock</span>
+    <small>The beach shows your time of day: sunrise 06:00, sunset 18:00</small>
+  </label>
+
+  <div class="seg clock-ctl" role="group" aria-label="Event">
+    <button id="m-sunset" aria-pressed="true">Sunset</button>
+    <button id="m-sunrise" aria-pressed="false">Sunrise</button>
+  </div>
+
+  <div class="field clock-ctl">
+    <div class="label"><label for="pos">Play from</label><output id="pos-out">−60 min</output></div>
+    <input type="range" id="pos" min="-360" max="360" step="1" value="-60">
+    <div class="ticks"><span>−6 h</span><span>−4 h</span><span>−2 h</span><span id="tick-0">sunset</span><span>+2 h</span><span>+4 h</span><span>+6 h</span></div>
+  </div>
+
+  <div class="field clock-ctl">
+    <div class="label"><span>Speed</span><output id="speed-out">real time</output></div>
+    <div class="chips" id="speeds" role="group" aria-label="Speed">
+      <button data-v="1">1×</button><button data-v="2">2×</button><button data-v="5">5×</button>
+      <button data-v="10">10×</button><button data-v="30">30×</button><button data-v="120">120×</button>
+    </div>
+  </div>
+
+  <div class="field clock-ctl">
+    <label class="label" for="loop">When it gets dark</label>
+    <select id="loop">
+      <option value="off">Keep going through the night</option>
+      <option value="30">Loop back 30 min after the event</option>
+      <option value="60">Loop back 1 h after the event</option>
+      <option value="90">Loop back 1.5 h after the event</option>
+      <option value="120">Loop back 2 h after the event</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <div class="label"><label for="clouds">Clouds</label><output id="clouds-out"></output></div>
+      <input type="range" id="clouds" min="0" max="1" step="0.01">
+    </div>
+    <div class="field">
+      <div class="label"><label for="waves">Surf</label><output id="waves-out"></output></div>
+      <input type="range" id="waves" min="0.2" max="1.8" step="0.01">
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <div class="label"><label for="vivid">Colour</label><output id="vivid-out"></output></div>
+      <input type="range" id="vivid" min="0.6" max="1.8" step="0.01">
+    </div>
+    <div class="field">
+      <div class="label"><label for="quality">Detail</label></div>
+      <select id="quality">
+        <option value="auto">Auto</option>
+        <option value="1.5">Sharp</option>
+        <option value="1">Normal</option>
+        <option value="0.6">Light</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="actions clock-ctl">
+    <button class="btn primary" id="play">Pause</button>
+    <button class="btn" id="restart">Restart from start point</button>
+    <button class="btn" id="fs">Fullscreen</button>
+  </div>
+  <div class="keys"><kbd>M</kbd> menu · <kbd>F</kbd> fullscreen · <kbd>Space</kbd> pause · <kbd>←</kbd><kbd>→</kbd> ±5 min (not while following the clock)</div>
+</aside>
+
+<script>
+(() => {
+"use strict";
+
+/* ---------- settings ---------- */
+const DEFAULTS = { mode: "sunset", start: -60, rel: -60, speed: 1, loop: "off", clouds: 0.55, waves: 1, vivid: 1.25, quality: "auto", paused: false, linked: false };
+let S = { ...DEFAULTS };
+try { const raw = localStorage.getItem("sunset-shore"); if (raw) S = { ...S, ...JSON.parse(raw) }; } catch (e) {}
+let saveT = 0;
+function save(force) {
+  const now = performance.now();
+  if (!force && now - saveT < 3000) return;
+  saveT = now;
+  try { localStorage.setItem("sunset-shore", JSON.stringify(S)); } catch (e) {}
+}
+
+/* ---------- sun & atmosphere model (shared with the shaders) ---------- */
+const LAT = 20.8 * Math.PI / 180;   // a Hawaiian beach
+const DEC = 0;                      // equinox: sunrise 06:00, sunset 18:00 solar time
+const YAW = 0.17;                   // sun sits a little left of centre, like the photo
+const Re = 6360e3, Ra = 6460e3, SUN_I = 22;
+const BR = [5.8e-6, 13.5e-6, 33.1e-6], BM = 21e-6, BO = [0.65e-6, 1.881e-6, 0.085e-6];
+let MIE = 1;                        // haze amount: full at sunset, clear tropical air by day
+
+function todHours(mode, rel) { return (mode === "sunset" ? 18 : 6) + rel / 60; }
+
+function sunDir(mode, rel) {
+  const H = (todHours(mode, rel) - 12) * 15 * Math.PI / 180;
+  const E = -Math.cos(DEC) * Math.sin(H);
+  const N = Math.cos(LAT) * Math.sin(DEC) - Math.sin(LAT) * Math.cos(DEC) * Math.cos(H);
+  const U = Math.sin(LAT) * Math.sin(DEC) + Math.cos(LAT) * Math.cos(DEC) * Math.cos(H);
+  // camera faces west for sunset, east for sunrise; world: x right, y up, -z forward
+  let x, z;
+  if (mode === "sunset") { x = N; z = E; } else { x = -N; z = -E; }
+  const az = Math.atan2(x, -z) - YAW, h = Math.hypot(x, z);
+  return [Math.sin(az) * h, U, -Math.cos(az) * h];
+}
+
+function dens(h) {
+  h = Math.max(h, 0);
+  return [Math.exp(-h / 8000), Math.exp(-h / 1200), Math.max(0, 1 - Math.abs(h - 25000) / 15000)];
+}
+function rsiFar(o, d, r) {
+  const b = o[0]*d[0] + o[1]*d[1] + o[2]*d[2], c = o[0]*o[0] + o[1]*o[1] + o[2]*o[2] - r*r, h = b*b - c;
+  return h < 0 ? -1 : -b + Math.sqrt(h);
+}
+function shadowF(p, sd) {
+  const b = p[0]*sd[0] + p[1]*sd[1] + p[2]*sd[2];
+  if (b > 0) return 1;
+  const d = Math.sqrt(Math.max(p[0]*p[0] + p[1]*p[1] + p[2]*p[2] - b*b, 0));
+  const t = Math.min(Math.max((d - (Re - 2000)) / 5000, 0), 1);
+  return t * t * (3 - 2 * t);
+}
+function lightDepth(p, sd, n) {
+  const tl = rsiFar(p, sd, Ra); const od = [0, 0, 0]; let q0 = 0;
+  for (let j = 0; j < n; j++) {
+    const f = (j + 1) / n, q1 = tl * f * f, dq = q1 - q0, qm = 0.5 * (q0 + q1); q0 = q1;
+    const x = p[0] + sd[0]*qm, y = p[1] + sd[1]*qm, z = p[2] + sd[2]*qm;
+    const dd = dens(Math.hypot(x, y, z) - Re);
+    od[0] += dd[0]*dq; od[1] += dd[1]*dq; od[2] += dd[2]*dq;
+  }
+  return od;
+}
+function sunAt(h, sd) {           // sunlight reaching altitude h
+  const p = [0, Re + h, 0], sh = shadowF(p, sd);
+  if (sh <= 0) return [0, 0, 0];
+  const od = lightDepth(p, sd, 24);
+  return [0, 1, 2].map(i => SUN_I * sh * Math.exp(-(BR[i]*od[0] + BM*MIE*1.1*od[1] + BO[i]*od[2])));
+}
+function scatter(rd, sd) {
+  const ro = [0, Re + 2, 0];
+  let tmax = rsiFar(ro, rd, Ra);
+  if (rd[1] < 0) { const b = (Re + 2) * rd[1], c = 2 * Re * 2 + 4, h = b*b - c; if (h > 0) tmax = Math.min(tmax, -b - Math.sqrt(h)); }
+  const N = 16; const od = [0, 0, 0], sR = [0, 0, 0], sM = [0, 0, 0]; let tp = 0;
+  for (let i = 0; i < N; i++) {
+    const f = (i + 1) / N, t1 = tmax * f * f, ds = t1 - tp, tm = 0.5 * (t1 + tp); tp = t1;
+    const p = [ro[0] + rd[0]*tm, ro[1] + rd[1]*tm, ro[2] + rd[2]*tm];
+    const dd = dens(Math.hypot(p[0], p[1], p[2]) - Re);
+    od[0] += dd[0]*ds; od[1] += dd[1]*ds; od[2] += dd[2]*ds;
+    const sh = shadowF(p, sd); if (sh <= 0) continue;
+    const ol = lightDepth(p, sd, 8);
+    for (let k = 0; k < 3; k++) {
+      const a = sh * Math.exp(-(BR[k]*(od[0] + ol[0]) + BM*MIE*1.1*(od[1] + ol[1]) + BO[k]*(od[2] + ol[2])));
+      sR[k] += a * dd[0] * ds; sM[k] += a * dd[1] * ds;
+    }
+  }
+  const mu = rd[0]*sd[0] + rd[1]*sd[1] + rd[2]*sd[2], g = 0.76;
+  const pR = 3 / (16 * Math.PI) * (1 + mu*mu);
+  const pM = 3 / (8 * Math.PI) * ((1 - g*g) * (1 + mu*mu)) / ((2 + g*g) * Math.pow(1 + g*g - 2*g*mu, 1.5));
+  return [0, 1, 2].map(k => SUN_I * (sR[k]*BR[k]*pR + sM[k]*BM*MIE*pM));
+}
+function dirAE(az, el) { return [Math.sin(az)*Math.cos(el), Math.sin(el), -Math.cos(az)*Math.cos(el)]; }
+
+// average sky radiance + exposure for one sun position
+function lighting(sun) {
+  const elDeg = Math.asin(sun[1]) * 180 / Math.PI;
+  const dk = Math.min(1, Math.max(0, (elDeg - 8) / 17)), day = dk * dk * (3 - 2 * dk);
+  MIE = 1 - 0.75 * day;
+  const sAz = Math.atan2(sun[0], -sun[2]);
+  const dirs = [[0, 1.55]];
+  for (let k = 0; k < 4; k++) { dirs.push([sAz + k * Math.PI / 2, 0.55]); dirs.push([sAz + k * Math.PI / 2 + Math.PI / 4, 0.12]); }
+  const amb = [0, 0, 0];
+  for (const [a, e] of dirs) { const c = scatter(dirAE(a, e), sun); amb[0] += c[0]; amb[1] += c[1]; amb[2] += c[2]; }
+  for (let k = 0; k < 3; k++) amb[k] /= dirs.length;
+  const view = scatter(dirAE(sAz, 0.08), sun);
+  const L = 0.6 * lum(amb) + 0.4 * lum(view) * 0.5;
+  const sc0 = sunAt(0, sun);
+  // in daylight, expose for the sunlit sand rather than the sky (otherwise the beach burns out)
+  const E = lum(sc0) * Math.max(sun[1], 0) + Math.PI * lum(amb);
+  const skyExp = Math.min(0.5 / Math.pow(L + 1e-6, 0.78), 4 / (E + 1e-6));
+  const exposure = Math.min(55, Math.max(0.2, skyExp + (3 / (E + 1e-6) - skyExp) * day));
+  return { amb, exposure, day, sc0, sc1: sunAt(2000, sun), sc2: sunAt(7500, sun) };
+}
+function lum(c) { return 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2]; }
+function aces(x) { return Math.min(1, Math.max(0, (x*(2.51*x + 0.03)) / (x*(2.43*x + 0.59) + 0.14))); }
+function toCss(c, exp, a = 1) {
+  const v = c.map(x => Math.round(255 * Math.pow(aces(x * exp), 1 / 2.2)));
+  return a < 1 ? `rgba(${v[0]},${v[1]},${v[2]},${a})` : `rgb(${v[0]},${v[1]},${v[2]})`;
+}
+
+/* ---------- WebGL ---------- */
+const canvas = document.getElementById("scene");
+const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, powerPreference: "high-performance", preserveDrawingBuffer: false });
+if (!gl) { const e = document.getElementById("err"); e.hidden = false; e.textContent = "This browser has WebGL 2 turned off. Try a current Chrome, Edge or Firefox with hardware acceleration on."; return; }
+
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+
+const ATMO = `
+#define PI 3.14159265
+const float Re = 6360e3; const float Ra = 6460e3;
+const vec3 bR = vec3(5.8e-6, 13.5e-6, 33.1e-6); const float bM = 21e-6; const vec3 bO = vec3(0.65e-6, 1.881e-6, 0.085e-6);
+vec3 dens(float h){ h = max(h, 0.); return vec3(exp(-h/8000.), exp(-h/1200.), max(0., 1. - abs(h - 25000.)/15000.)); }
+float rsiFar(vec3 o, vec3 d, float r){ float b = dot(o,d); float c = dot(o,o) - r*r; float h = b*b - c; return h < 0. ? -1. : -b + sqrt(h); }
+float shadowF(vec3 p, vec3 sd){ float b = dot(p, sd); if (b > 0.) return 1.; float d = sqrt(max(dot(p,p) - b*b, 0.)); return smoothstep(Re - 2000., Re + 3000., d); }
+`;
+
+const LUT_FS = `#version 300 es
+precision highp float;
+out vec4 o; uniform vec2 uRes; uniform float uSunEl; uniform float uEnc; uniform float uMie;
+${ATMO}
+vec3 scatter(vec3 rd, vec3 sd){
+  vec3 ro = vec3(0., Re + 2., 0.);
+  float tmax = rsiFar(ro, rd, Ra);
+  if (rd.y < 0.) { float b = (Re + 2.)*rd.y; float h = b*b - (4.*Re + 4.); if (h > 0.) tmax = min(tmax, -b - sqrt(h)); }
+  vec3 od = vec3(0.), sR = vec3(0.), sM = vec3(0.); float tp = 0.;
+  for (int i = 0; i < 32; i++) {
+    float f = float(i + 1)/32.; float t1 = tmax*f*f; float ds = t1 - tp; float tm = .5*(t1 + tp); tp = t1;
+    vec3 p = ro + rd*tm; vec3 dd = dens(length(p) - Re)*ds; od += dd;
+    float sh = shadowF(p, sd); if (sh <= 0.) continue;
+    float tl = rsiFar(p, sd, Ra); vec3 ol = vec3(0.); float q0 = 0.;
+    for (int j = 0; j < 12; j++) {
+      float g = float(j + 1)/12.; float q1 = tl*g*g; ol += dens(length(p + sd*(.5*(q0 + q1))) - Re)*(q1 - q0); q0 = q1;
+    }
+    vec3 a = sh*exp(-(bR*(od.x + ol.x) + bM*uMie*1.1*(od.y + ol.y) + bO*(od.z + ol.z)));
+    sR += a*dd.x; sM += a*dd.y;
+  }
+  float mu = dot(rd, sd); float g = .76;
+  float pR = 3./(16.*PI)*(1. + mu*mu);
+  float pM = 3./(8.*PI)*((1. - g*g)*(1. + mu*mu))/((2. + g*g)*pow(1. + g*g - 2.*g*mu, 1.5));
+  return 22.*(sR*bR*pR + sM*bM*uMie*pM);
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy/uRes;
+  float az = uv.x*uv.x*PI; float el = -.04 + uv.y*uv.y*(PI*.5 + .04);
+  vec3 rd = vec3(sin(az)*cos(el), sin(el), -cos(az)*cos(el));
+  vec3 c = scatter(rd, vec3(0., sin(uSunEl), -cos(uSunEl)));
+  o = vec4(uEnc > .5 ? sqrt(clamp(c/16., 0., 1.)) : c, 1.);
+}`;
+
+const MAIN_FS = `#version 300 es
+precision highp float;
+out vec4 outC;
+uniform vec2 uRes; uniform float uT; uniform vec3 uSun; uniform sampler2D uSky; uniform float uEnc;
+uniform vec3 uSC0, uSC1, uSC2, uAmb;
+uniform float uExp, uCloud, uWave, uVivid, uNight, uHor, uCx, uDay;
+uniform float uLayer;   // 0: scene with the back bushes, 1: only the close bushes and grass, -1: everything
+${ATMO}
+const float F = 1.15; const float CAMH = 1.6;
+
+float h12(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y)*p3.z); }
+float h13(vec3 p3){ p3 = fract(p3*.1031); p3 += dot(p3, p3.zyx + 31.32); return fract((p3.x + p3.y)*p3.z); }
+float vn(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f*f*(3. - 2.*f);
+  return mix(mix(h12(i), h12(i + vec2(1,0)), u.x), mix(h12(i + vec2(0,1)), h12(i + vec2(1,1)), u.x), u.y); }
+float fbm(vec2 p, int oct){ float a = .5, s = 0.; mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+  for (int i = 0; i < 7; i++) { if (i >= oct) break; s += a*vn(p); p = m*p; a *= .5; } return s; }
+float vn3(vec3 p){ vec3 i = floor(p), f = fract(p); vec3 u = f*f*(3. - 2.*f);
+  return mix(mix(mix(h13(i), h13(i + vec3(1,0,0)), u.x), mix(h13(i + vec3(0,1,0)), h13(i + vec3(1,1,0)), u.x), u.y),
+             mix(mix(h13(i + vec3(0,0,1)), h13(i + vec3(1,0,1)), u.x), mix(h13(i + vec3(0,1,1)), h13(i + vec3(1,1,1)), u.x), u.y), u.z); }
+// fbm whose shape evolves with z (time); finer octaves evolve faster, like real wisps
+float fbmT(vec2 p, float z, int oct){ float a = .5, s = 0.; mat2 m = mat2(1.6, 1.2, -1.2, 1.6);
+  for (int i = 0; i < 7; i++) { if (i >= oct) break; s += a*vn3(vec3(p, z)); p = m*p; z *= 1.6; a *= .5; } return s; }
+
+vec3 dec(vec3 c){ return uEnc > .5 ? c*c*16. : c; }
+vec3 skyRaw(vec3 rd);
+// daytime grade, like a polarising filter: deeper, more saturated blue
+vec3 skyL(vec3 rd){
+  vec3 c = skyRaw(rd);
+  float l = dot(c, vec3(.2126, .7152, .0722));
+  c = max(mix(vec3(l), c, 1. + .9*uDay), 0.);
+  return c*(1. + .9*uDay*exp(-l*2.5));     // deepen the darker blue overhead, leave the bright glow alone
+}
+vec3 skyRaw(vec3 rd){
+  float el = asin(clamp(rd.y, -1., 1.));
+  vec2 sh = uSun.xz; float ls = length(sh); sh = ls > 1e-4 ? sh/ls : vec2(0., -1.);
+  vec2 rh = rd.xz; float lr = length(rh); rh = lr > 1e-4 ? rh/lr : sh;
+  float az = acos(clamp(dot(sh, rh), -1., 1.));
+  vec2 uv = vec2(sqrt(az/PI), sqrt(clamp((el + .04)/(PI*.5 + .04), 0., 1.)));
+  return dec(texture(uSky, uv).rgb);
+}
+float hg(float mu, float g){ float g2 = g*g; return (1. - g2)/(4.*PI*pow(1. + g2 - 2.*g*mu, 1.5)); }
+
+vec3 stars(vec3 rd){
+  vec3 q = rd*170.; vec3 c = floor(q); vec3 f = fract(q) - .5;
+  float h = h13(c); if (h < .93) return vec3(0.);
+  vec3 o = vec3(h13(c + 17.1), h13(c + 3.7), h13(c + 9.2)) - .5;
+  float d = length(f - o*.5);
+  float b = pow((h - .93)/.07, 5.)*smoothstep(.26, 0., d);
+  float tw = .65 + .35*sin(uT*(1.5 + h*4.) + h*60.);
+  return mix(vec3(1., .82, .66), vec3(.72, .82, 1.), h13(c + 5.))*b*tw*.05;
+}
+
+// wind moves the cloud field; evo (much slower) reshapes it
+vec4 cloudLayer(vec3 rd, float alt, vec2 scl, float cov, vec2 wind, float evo, vec3 sc, float thick, float seed, vec3 skyc, int oct){
+  if (rd.y < -.01 || cov <= .01) return vec4(0.);
+  float b = (Re + CAMH)*rd.y; float c = (CAMH - alt)*(2.*Re + CAMH + alt);
+  float t = -b + sqrt(b*b - c);
+  vec2 p = rd.xz*t/scl + wind*uT + seed;
+  float lo = 1. - cov;
+  float z = uT*evo + seed;
+  float n = fbmT(p, z, oct);
+  float d = smoothstep(lo, lo + .28, n);
+  if (d <= .002) return vec4(0.);
+  vec2 sdir = uSun.xz; float sl = length(sdir); sdir = sl > 1e-4 ? sdir/sl : vec2(0.);
+  float occ = smoothstep(lo, lo + .4, fbmT(p + sdir*.1, z, 4))*.7 + smoothstep(lo, lo + .4, fbmT(p + sdir*.28, z, 3))*.5;
+  float tr = exp(-thick*occ*2.6);
+  float mu = dot(rd, uSun);
+  float ph = mix(hg(mu, .6), hg(mu, -.15), .35)*4.*PI;
+  float edge = 1. - d;
+  vec3 sun = sc*tr*ph*(.7 + .9*edge*smoothstep(.7, 1., mu));
+  vec3 col = (sun/PI + uAmb*(1.15 - .5*d))*.9;
+  float fog = 1. - exp(-t/90000.);
+  col = mix(col, skyc, fog*.85);
+  float a = d*(1. - fog*.45)*smoothstep(-.005, .02, rd.y);
+  return vec4(col*a, a);
+}
+
+float ridge(vec3 rd){
+  float ax = atan(rd.x, -rd.z);
+  return .017*smoothstep(-.5, -.3, ax)*(1. - smoothstep(-.17, -.03, ax))*(.72 + .28*vn(vec2(ax*45., 2.)));
+}
+
+vec3 skyFull(vec3 rd, bool disk){
+  vec3 base = skyL(rd) + uAmb*.1*(1. - .8*uDay)*vec3(.75, .85, 1.2) + vec3(.0006, .001, .0024)*(1.2 - rd.y);
+  vec3 col = base;
+  col += stars(rd)*uNight*smoothstep(0., .12, rd.y);
+  if (disk) {
+    float cs = dot(rd, uSun); const float sr = .0105;
+    col += uSC0*smoothstep(cos(sr), cos(sr*.8), cs)*25.;
+  }
+  vec4 c2 = cloudLayer(rd, 7500., vec2(15000., 5500.), uCloud*.72, vec2(.0018, .0005), .0025, uSC2, .5, 11.3, base, 5);
+  col = col*(1. - c2.a) + c2.rgb;
+  vec4 c1 = cloudLayer(rd, 2000., vec2(3200.), uCloud, vec2(.0032, .0009), .0055, uSC1, 1., 3.1, base, 6);
+  col = col*(1. - c1.a) + c1.rgb;
+  float rg = ridge(rd);
+  if (rd.y < rg) {
+    vec3 hz = skyL(vec3(rd.x, .002, rd.z)) + uAmb*.1;
+    vec3 m = uAmb*.05 + uSC0*max(uSun.y, 0.)*.01;
+    col = mix(m, hz, .7);
+  }
+  return col;
+}
+
+/* shore, breaking waves and swash */
+const float SPACING = 30.;     // metres between wave crests (9 s period)
+// beach profile: almost flat (1:80) where the swash runs, steepening up to a dry berm
+float sandY(float s){
+  float u = -s;
+  return u > 0. ? u*.012 + .05*(log(1. + exp(u - 7.)) - log(1. + exp(-7.))) : u*.028;
+}
+vec2 shore(vec2 xz){           // x: metres seaward of the still waterline, y: metres along the beach
+  vec2 rel = xz - vec2(3.4, -6.);
+  const vec2 D = vec2(-.371391, -.928477); const vec2 N = vec2(.928477, -.371391);
+  float a = dot(rel, D);
+  return vec2(dot(rel, N) + 1.5*sin(a*.035) + 3.*sin(a*.011 + 1.3) - 2.891, a);
+}
+float swellPhase(float a){ return uT/9. + a*.0035 + .12*sin(a*.021); }
+float crestHm(float a, float m){ return min((.5 + .8*vn(vec2(a*.045, m*1.73)))*uWave, 1.5); }
+
+// One wave, numbered m. Returns (height, foam, lip glow, x), where x is metres seaward of its crest.
+// It shoals and steepens, crashes at sb, then rolls on as a whitewater bore. mist = spray it throws.
+vec4 crest(float s, float a, float m, float phi0, out float mist){
+  float sc = SPACING*(m - phi0) - .6;
+  float x = s - sc;
+  float Hm = crestHm(a, m);
+  float sb = 4. + 9.*Hm;
+  float alive = smoothstep(-2., 1., sc);
+  float grow = .22 + .78*smoothstep(sb + 50., sb + 2., sc);
+  float steep = smoothstep(sb + 16., sb, sc);
+  float c = clamp((sb - sc)/(3. + 3.*Hm), 0., 1.);       // 0 → 1 through the crash
+  float bore = smoothstep(.55, 1., c);
+  float H = Hm*grow*mix(1., .42, smoothstep(.1, .8, c))*mix(1., .3, smoothstep(sb - 6., -.5, sc))*alive;
+  float wf = mix(mix(4.5, .8, steep), .3, smoothstep(0., .5, c));
+  float wb = mix(8., 5., steep) + 8.*bore;
+  float prof = x < 0. ? exp(-x*x/(wf*wf)) : exp(-x/wb);
+  float plateau = x < 0. ? exp(-x*x/.12) : .75*exp(-x/16.) + .25*exp(-x/2.5);
+  prof = mix(prof, plateau, bore);
+  float xi = x + 1.6*Hm;                                    // where the lip lands
+  float splash = Hm*.45*sin(clamp(c*1.4, 0., 1.)*PI)*exp(-xi*xi/(.6*Hm + .2));
+  float h = H*prof + splash*alive;
+  float ign = smoothstep(.02, .25, c);
+  float fC = ign*(x < 0. ? exp(-x*x/(1.5*Hm*Hm + .4)) : exp(-x/(1.5 + 7.*c)));
+  float fB = bore*(x < 0. ? exp(-x*x/.5) : .85*exp(-x/10.) + .15*exp(-x/40.));
+  float foam = max(fC, fB)*smoothstep(-4., 0., sc);
+  float lip = (1. - ign)*steep*smoothstep(.5, .95, prof)*step(x, .8)*alive;
+  mist = sin(clamp(c*1.25, 0., 1.)*PI)*Hm*exp(-(x + 1.)*(x + 1.)/(2. + 4.*c))*alive;
+  return vec4(h, foam, lip, x);
+}
+float swashRm(float a, float m){ return 1.4 + 4.2*crestHm(a, m); }       // how far wave m runs up
+float swashUp(float phi){ return phi < .22 ? sin(phi/.22*PI*.5) : pow(1. - (phi - .22)/.78, 1.7); }
+vec3 swash(float a){   // phase, max run-up, current edge offset
+  float ph0 = swellPhase(a);
+  float cyc = floor(ph0); float phi = ph0 - cyc;
+  float rm = swashRm(a, cyc);
+  return vec3(phi, rm, rm*swashUp(phi) - .6);
+}
+// Memory of the last six waves at one spot on the sand.
+// x: seconds since water last drained off it (999 = untouched), y: which wave that was,
+// z: a swash line lying here, until a later wave runs over it.
+vec3 swashHist(float s, float a){
+  float ph0 = swellPhase(a); float cyc = floor(ph0); float phi = ph0 - cyc;
+  float u = -s, tS = 999., seed = 0., mark = 0., reach = -1e3;
+  for (int k = 0; k < 6; k++) {
+    float m = cyc - float(k);
+    float rm = swashRm(a, m);
+    float top = rm - .6;
+    float reached = (k == 0 && phi < .22) ? rm*swashUp(phi) - .6 : top;
+    if (tS > 998. && u < reached) {
+      float r = clamp((u + .6)/rm, 0., 1.);
+      float phiU = .22 + .78*(1. - pow(r, 1./1.7));
+      tS = max(0., (float(k) + phi - phiU)*9.);
+      seed = m;
+    }
+    if ((k > 0 || phi >= .22) && top > reach + .03) {
+      float d = u - top;
+      float w = d > 0. ? .05 : .2;     // crisp on the dry side, soft on the wet side
+      mark = max(mark, exp(-d*d/(w*w))*exp(-(float(k) + phi)*9./150.));
+    }
+    reach = max(reach, reached);
+  }
+  return vec3(tS, seed, mark);
+}
+// returns (surface height, water depth over sand, spray, sand height); wv = (foam, lip glow, x, swash edge)
+vec4 field(vec2 xz, out vec4 wv){
+  vec2 sa = shore(xz); float s = sa.x, a = sa.y;
+  float ys = sandY(s);
+  float phi0 = swellPhase(a);
+  float m0 = floor((s + .6)/SPACING + phi0);
+  float mA, mB;
+  vec4 A = crest(s, a, m0, phi0, mA);
+  vec4 B = crest(s, a, m0 + 1., phi0, mB);
+  float yw = A.x + B.x;
+  vec3 sw = swash(a); float e = s + sw.z;
+  if (e > 0.) yw = max(yw, ys + .045*min(e, 1.2)); else yw = min(yw, ys - .001);
+  wv = vec4(max(A.y, B.y), max(A.z, B.z), A.w, e);
+  return vec4(max(yw, ys), yw - ys, max(mA, mB), ys);
+}
+float ripH(vec2 p, float fp){
+  float h = 0., l = 7., amp = .085*uWave;
+  for (int i = 0; i < 8; i++) {
+    float k = 2.*PI/l; float w = sqrt(9.81*k);
+    float an = 2.76 + sin(float(i)*2.4)*.9;
+    float lod = 1. - smoothstep(l*.1, l*.45, fp);
+    h += amp*lod*sin(dot(vec2(cos(an), sin(an)), p)*k - w*uT + float(i)*1.93);
+    l *= .6; amp *= .56;
+  }
+  return h;
+}
+float surfaceH(vec2 xz, float fp){
+  vec4 wv; vec4 f = field(xz, wv);
+  return f.x + ripH(xz, fp)*smoothstep(0., .05, f.y)*(1. - .6*wv.x);
+}
+vec3 sunSpec(vec3 n, vec3 rd, float r){
+  vec3 h = normalize(uSun - rd); float nh = max(dot(n, h), 0.);
+  float a2 = r*r; float dd = nh*nh*(a2 - 1.) + 1.;
+  float D = a2/(PI*dd*dd);
+  float Fr = .02 + .98*pow(1. - max(dot(h, -rd), 0.), 5.);
+  float vis = step(0., dot(n, uSun))*smoothstep(-.02, .01, uSun.y);
+  return uSC0*min(D*Fr/(4.*max(dot(n, -rd), .05)), 400.)*vis;
+}
+
+/* low vegetation along the back of the beach. Positions are in screen heights (x from the
+   left edge, y from the top) so it lines up with the palms; d is its distance in metres. */
+float hedgeTopBase(float X){ return .47 + .1*clamp(X/.48, 0., 1.) + .012*sin(X*37.) + .008*sin(X*91. + 1.); }
+float hedgeBottom(float X){ return mix(.625, .588, smoothstep(0., .5, X)) + .004*sin(X*23. + .5) + .0025*sin(X*57. + 2.); }
+float shrubBottom(float X){ return .662 + .01*sin(X*17.) + .006*sin(X*43. + 1.); }
+float shrubTopBase(float X){ float q = (X - .04)/.1; return .605 - .075*exp(-q*q) + .006*sin(X*60.); }
+// Bushes are rows of overlapping rounded clumps: front rows sit lower and cover the dim bases of the rows
+// behind, which is what gives the hedge its depth. Clump spacing w(X) = A*X + B*X^2 shrinks with distance.
+float xOfW(float w, float A, float B){ return B < 1e-4 ? w/A : (-A + sqrt(max(A*A + 4.*B*w, 0.)))/(2.*B); }
+// one clump: a leafy disc on top of a column down to the ground; keeps the clump nearest the viewer
+bool clump(vec2 q, float cx, float tp, float r, float bot, float lf, float pix, float sw, inout float best, inout vec3 n, inout float a, inout float ao){
+  vec2 dp = q - vec2(cx, tp + r);
+  dp.x -= sw*smoothstep(r, -r, dp.y);
+  float rr = r*(1. + (lf - .5)*.3);
+  float nx = dp.x/rr, ny, cov;
+  if (dp.y < 0.) { float dd = length(dp)/rr; cov = clamp((1. - dd)*rr/pix, 0., 1.); ny = -dp.y/rr; }
+  else {   // below its crown a clump bulges out a little towards the ground, with a frayed leafy side
+    float hw = rr*(1. + .18*smoothstep(0., 1.5*r, dp.y))*(1. + (lf - .5)*.3);
+    cov = clamp((hw - abs(dp.x))/pix, 0., 1.); ny = -.25*min(dp.y/r, 1.); nx = dp.x/hw;
+  }
+  cov *= clamp((bot - q.y)/pix, 0., 1.);
+  if (cov <= 0.) return false;
+  float nz = sqrt(max(1. - nx*nx - ny*ny, .02));
+  if (nz <= best) return false;
+  best = nz; n = vec3(nx, ny, nz); a = cov;
+  ao = 1. - .7*smoothstep(0., 2.5*r, dp.y);     // a clump darkens towards its base
+  return true;
+}
+vec4 bushes(vec2 q, vec3 rd, float pix, bool shrub, int kLo, int kHi){
+  float seed = shrub ? 5.3 : 1.7, A = shrub ? 9. : 20., B = shrub ? 0. : 30.;
+  float d = shrub ? 15. : mix(45., 260., smoothstep(-.05, .5, q.x));
+  float mpl = F/d;                                   // screen units per metre at this distance
+  float lfK = smoothstep(1., 4., .3*mpl/pix);        // leaf clusters fade once they shrink below a couple of pixels
+  vec2 lq = q/(.3*mpl) + seed*11.;
+  float lf = mix(.5, fbm(lq, 4), lfK);
+  float w = q.x*(A + B*q.x);
+  vec3 n = vec3(0.); float ao = 0., a = 0., best = -1., row = -1.;
+  for (int k = 3; k >= 0; k--) {                     // front row first; the first row that covers the pixel wins
+    if (shrub ? k > 1 : (k < kLo || k > kHi)) continue;
+    float wk = w + float(k)*.37;
+    for (int j = -1; j <= 1; j++) {
+      float ci = floor(wk) + float(j);
+      float h1 = h12(vec2(ci, float(k) + seed)), h2 = h12(vec2(ci + 7.1, float(k) + seed)), h3 = h12(vec2(ci + 3.3, float(k) + seed + 1.));
+      float cx = xOfW(ci + .2 + .6*h1 - float(k)*.37, A, B);
+      if (shrub && (cx < -.08 || cx > .15)) continue;
+      float r = (.6 + .45*h2)/(A + 2.*B*cx);
+      float tp = (shrub ? shrubTopBase(cx) : hedgeTopBase(cx)) + float(k)*(shrub ? .03 : .014) + (h3 - .5)*r*.6;
+      float bot = (shrub ? shrubBottom(q.x) : hedgeBottom(q.x)) + (lf - .5)*(shrub ? .012 : .2*mpl);
+      if (!shrub) { float tpr = smoothstep(.42, .53, cx); r *= 1. - .6*tpr; tp = mix(tp, hedgeBottom(cx) + .004 - r, tpr); }
+      tp = min(tp, (shrub ? shrubBottom(cx) : hedgeBottom(cx)) - 1.4*r);   // no clump hangs below the ground line
+      if (shrub) r *= 1. - .35*smoothstep(.05, .15, abs(cx - .04));
+      float sw = .0005*(shrub ? 2.5 : 1.)*sin(uT*1.1 + ci*1.7 + float(k));
+      if (clump(q, cx, tp, r, bot, lf, pix, sw, best, n, a, ao)) row = float(k);
+    }
+    if (row >= 0.) { if (k > (shrub ? 0 : kLo)) a = 1.; break; }
+  }
+  if (row < 0.) return vec4(0.);
+  // clumps further back get less sun and sky, and go cooler and hazier
+  float rowF = shrub ? mix(.7, 1., row) : mix(.5, 1., row/3.);
+  // leafy relief on top of the clump shape
+  float gx = 0., gy = 0.;
+  if (lfK > 0.) { gx = (fbm(lq + vec2(.4, 0.), 4) - lf)*lfK; gy = (fbm(lq + vec2(0., .4), 4) - lf)*lfK; }
+  n = normalize(n + vec3(-gx*2., gy*2., 0.));
+  float patchN = vn(q/(4.*mpl) + seed);
+  vec3 alb = mix(vec3(.05, .12, .035), vec3(.1, .16, .035), patchN);
+  float cav = smoothstep(.2, .7, lf);
+  ao *= .45 + .55*cav;
+  float lam = clamp((dot(n, uSun) + .35)/1.35, 0., 1.)*(.4 + .6*cav)*rowF*rowF;   // soft, wrapped light
+  float rim = pow(1. - n.z, 2.);
+  float back = pow(max(dot(rd, uSun), 0.), 12.)*(.06 + 1.4*rim)*(.4 + .8*lf)*rowF;   // only thin outer leaves glow
+  vec3 col = alb/PI*uSC0*lam*ao*1.4 + alb*uAmb*(.6 + .4*n.y)*ao*mix(.65, 1., rowF) + uSC0*vec3(.2, .32, .05)/PI*back*1.4;
+  col = mix(col, col*vec3(.8, .95, 1.2), 1. - rowF);
+  vec3 hz = skyL(vec3(rd.x, .01, rd.z)) + uAmb*.1*vec3(.75, .85, 1.2);
+  float haze = (1. - exp(-d/mix(4000., 1100., uDay)))*(1. + .6*(1. - rowF));   // low sun: keep it a silhouette
+  return vec4(mix(col, hz, haze), a);
+}
+// a band of beach grass where the bushes meet the sand: dry straw and green blades, swaying, glowing when backlit
+vec4 grass(vec2 q, vec3 rd, float bot, float d, float pix, float seed, float hk){
+  if (hk <= .01) return vec4(0.);
+  float mpl = F/d, gh = .7*mpl*hk;
+  if (q.y < bot - gh*1.1 || q.y > bot + 2.*pix) return vec4(0.);
+  float sp = max(.07*mpl, 1.3*pix), cov = 0., tH = 0., tone = 0.;
+  for (int l = 0; l < 2; l++) {
+    float i0 = floor(q.x/sp + float(l)*.5);
+    for (int j = -2; j <= 2; j++) {
+      float ci = i0 + float(j);
+      float h1 = h12(vec2(ci, float(l) + seed)), h2 = h12(vec2(ci + 5.3, float(l) + seed)), h3 = h12(vec2(ci + 9.1, float(l) + seed));
+      float tuft = vn(vec2((ci + h1)*sp/(.6*mpl), float(l)*3. + seed));   // grass grows in tufts with gaps between
+      if (h2 > .25 + .9*tuft) continue;
+      float b0 = bot + (h1 - .5)*.15*mpl;
+      float hb = gh*(.3 + .5*h2 + .6*tuft);
+      float t = (b0 - q.y)/hb;
+      if (t < 0. || t > 1.) continue;
+      float lean = (h3 - .5)*.35 + .08*sin(uT*1.4 + ci*.7 + float(l)*2.);
+      float bx = (ci + h1 - float(l)*.5)*sp + lean*hb*t*t;
+      float wd = max(.01*mpl*(1. - .8*t), .55*pix);
+      float c = clamp((wd - abs(q.x - bx))/pix + .5, 0., 1.);
+      if (c > cov) { cov = c; tH = t; tone = h3; }
+    }
+  }
+  if (cov <= 0.) return vec4(0.);
+  vec3 alb = mix(vec3(.3, .25, .12), vec3(.13, .19, .06), smoothstep(.3, .7, tone));
+  vec3 n = normalize(vec3(0., .5, .85));
+  float lam = clamp((dot(n, uSun) + .3)/1.3, 0., 1.);
+  float ao = .45 + .55*tH;
+  float back = pow(max(dot(rd, uSun), 0.), 10.)*(.1 + .9*tH*tH);
+  vec3 col = alb/PI*uSC0*lam*ao + alb*uAmb*.8*ao + uSC0*vec3(.25, .22, .08)/PI*back*1.5;
+  vec3 hz = skyL(vec3(rd.x, .01, rd.z)) + uAmb*.1*vec3(.75, .85, 1.2);
+  return vec4(mix(col, hz, 1. - exp(-d/mix(4000., 1100., uDay))), cov);
+}
+
+vec3 aces(vec3 x){ return clamp((x*(2.51*x + .03))/(x*(2.43*x + .59) + .14), 0., 1.); }
+vec3 grade(vec3 col, vec2 fc){
+  col *= uExp;
+  col = aces(col);
+  float l = dot(col, vec3(.2126, .7152, .0722));
+  col = max(mix(vec3(l), col, uVivid*(1. + .15*uDay)), 0.);
+  col += vec3(.018, -.006, .03)*l*(1. - l);
+  return pow(col, vec3(1./2.2)) + (h12(fc + fract(uT)*91.) - .5)/255.;
+}
+vec3 sunGlow(vec3 rd){ float ang = acos(clamp(dot(rd, uSun), -1., 1.)); return uSC0*(.012*exp(-ang*35.) + .0035*exp(-ang*7.)); }
+// the close bushes, shrub and grass: composited over a layer of palm trunks, premultiplied alpha
+vec4 frontVeg(vec2 fc){
+  vec2 vq = vec2(fc.x/uRes.y - uCx + .89, 1. - fc.y/uRes.y);
+  if (vq.x > .56 || vq.y < .38 || vq.y > .72) return vec4(0.);
+  vec3 rd = normalize(vec3(fc.x/uRes.y - uCx, (fc.y - uHor*uRes.y)/uRes.y, -F));
+  float pix = 1./uRes.y;
+  float dH = mix(45., 260., smoothstep(-.05, .5, vq.x)), hb = hedgeBottom(vq.x), hk = 1. - smoothstep(.45, .53, vq.x);
+  vec3 c = vec3(0.); float a = 0.;
+  // the far right palm stands behind the whole hedge, so around its lower trunk every row is drawn in front of it
+  bool behindAll = abs(vq.x - .372) < .014 && vq.y > .555;
+  vec4 L = bushes(vq, rd, pix, false, behindAll ? 0 : 2, 3); c = c*(1. - L.a) + L.rgb*L.a; a = a*(1. - L.a) + L.a;
+  L = grass(vq, rd, hb, dH, pix, 2.2, hk); c = c*(1. - L.a) + L.rgb*L.a; a = a*(1. - L.a) + L.a;
+  if (vq.x < .3) {
+    L = bushes(vq, rd, pix, true, 0, 1); c = c*(1. - L.a) + L.rgb*L.a; a = a*(1. - L.a) + L.a;
+    float hk2 = smoothstep(-.2, -.1, vq.x)*smoothstep(.24, .1, vq.x);
+    L = grass(vq, rd, shrubBottom(vq.x), 15., pix, 6.1, hk2); c = c*(1. - L.a) + L.rgb*L.a; a = a*(1. - L.a) + L.a;
+  }
+  if (a <= .001) return vec4(0.);
+  return vec4(grade(c/a + sunGlow(rd), fc)*a, a);
+}
+
+void main(){
+  vec2 fc = gl_FragCoord.xy;
+  if (uLayer > .5) { outC = frontVeg(fc); return; }
+  vec2 p = vec2(fc.x/uRes.y - uCx, (fc.y - uHor*uRes.y)/uRes.y);
+  vec3 rd = normalize(vec3(p.x, p.y, -F));
+  float pixA = 1./(uRes.y*F);
+  vec3 col;
+  if (rd.y >= 0.) {
+    col = skyFull(rd, true);
+  } else {
+    // march the waves near the shore; far out the sea is treated as flat
+    float camY = CAMH + max(0., sandY(shore(vec2(0.)).x));
+    vec3 ro = vec3(0., camY, 0.);
+    float tPl = camY/(-rd.y);
+    float t = tPl, mist = 0.;
+    vec4 wv, fd;
+    if (tPl < 1500.) {
+      float tEnd = min(tPl + .5, 400.);
+      t = max(.3, (camY - (2.7*uWave + .4))/(-rd.y));
+      float tp = t; bool hit = false;
+      for (int i = 0; i < 120; i++) {
+        vec3 q = ro + rd*t;
+        fd = field(q.xz, wv);
+        float d = q.y - fd.x;
+        if (d < 0.) { hit = true; break; }
+        float dt = max(d/(-rd.y + .35), .015 + t*.006);
+        if (fd.z > .001) mist += fd.z*exp(-d/(.35 + .6*fd.z))*(.3 + 1.4*vn(q.xz*1.4 + vec2(q.y*1.9, -uT*.9)))*min(dt, 1.5);
+        tp = t; t += dt;
+        if (t > tEnd) break;
+      }
+      if (hit) {
+        for (int j = 0; j < 6; j++) { float tm = .5*(tp + t); vec3 q = ro + rd*tm; if (q.y < field(q.xz, wv).x) t = tm; else tp = tm; }
+      } else t = tPl;
+    }
+    t = min(t, 60000.);
+    vec2 xz = (ro + rd*t).xz;
+    fd = field(xz, wv);
+    float fp = t*pixA/max(sqrt(-rd.y), .04);
+    vec2 sa = shore(xz); float s = sa.x; vec3 sw = swash(sa.y);
+    float e = wv.w;
+
+    // sand: what the last waves left behind
+    vec3 hist = swashHist(s, sa.y);
+    float tS = hist.x, seed = hist.y;
+    bool swept = tS < 998.;
+    // the shine drains away right behind the retreating water, so it trails the backwash edge
+    // down the beach; after about 5 s only the swash line at the top is left
+    float filmF = swept ? 1. - smoothstep(.3, 3.5, tS) : 0.;
+    float damp = swept ? (1. - smoothstep(.5, 5., tS))*.85 + .15*exp(-tS/40.) : 0.;
+    float fine = 1. - smoothstep(.02, .25, fp);
+    float sn = vn(xz*2.3)*.6 + vn(xz*9.)*.4; sn = mix(sn, .5, smoothstep(.05, .5, fp));
+    // every wave redraws the swash zone: drain rills running down the slope, and pinholes
+    vec2 rq = vec2(sa.y*7. + seed*13.7, s*1.1 + seed*5.3);
+    float rill = vn(rq)*.65 + vn(rq*vec2(2.3, 1.7) + 4.)*.35;
+    float pits = smoothstep(.78, .9, vn(xz*16. + seed*9.1));
+    float pat = swept ? ((rill - .5)*.9 - pits*.5)*fine : 0.;
+    vec3 sandA = vec3(.62, .47, .37)*(.88 + .24*sn)*(1. + .14*pat);
+    vec3 alb = mix(sandA, sandA*vec3(.52, .5, .5), max(damp, .85*filmF));
+    vec3 sandC = alb/PI*uSC0*max(uSun.y, 0.) + alb*uAmb;
+    vec3 colS = sandC;
+    float gloss = filmF*.95;
+    if (gloss > .01 && e < .1) {
+      vec2 gn = ((vec2(vn(rq*3.), vn(rq*3. + 13.)) - .5)*.05 + vec2(0., (rill - .5)*.04))*fine;
+      vec3 nw = normalize(vec3(gn.x, 1., gn.y));
+      vec3 Rw = reflect(rd, nw); Rw.y = max(Rw.y, .002);
+      float fw = .02 + .98*pow(1. - max(dot(nw, -rd), 0.), 5.);
+      colS = mix(sandC, skyFull(Rw, false), fw*gloss*.92) + sunSpec(nw, rd, mix(.3, .1, filmF))*gloss*.6;
+    }
+    // the last swash line: a soft rim of fine foam on darker sand
+    float mk = hist.z*(1. - .6*smoothstep(.2, 1.5, fp));
+    float bub = smoothstep(.55, .72, vn(xz*30. + seed*3.3))*fine;
+    colS = mix(colS, colS*.72, mk*.55);
+    colS = mix(colS, (uSC0*max(uSun.y, 0.)/PI + uAmb)*.85, mk*(.25 + .5*bub));
+    // single grains catching the sun
+    float cs = max(.012, fp*1.3);
+    vec2 gc = floor(xz/cs);
+    float gh = h12(gc + seed*31.7);
+    if (gh > .965) {
+      vec3 gnrm = normalize(vec3((h12(gc + 1.3) - .5)*.7, 1., (h12(gc + 7.1) - .5)*.7));
+      float g = pow(max(dot(reflect(rd, gnrm), uSun), 0.), 600.);
+      float tw = .6 + .4*sin(uT*(3. + gh*20.) + gh*90.);
+      colS += uSC0*g*tw*(.25 + 1.2*damp)*(1. - filmF)*6.;
+    }
+
+    float wm = smoothstep(0., .012, fd.y);
+    col = colS;
+    if (wm > 0.) {
+      float ee = max(fp*.7, .02);
+      float h0 = surfaceH(xz, fp);
+      vec3 n = normalize(vec3(h0 - surfaceH(xz + vec2(ee, 0.), fp), ee, h0 - surfaceH(xz + vec2(0., ee), fp)));
+      n = normalize(mix(n, vec3(0., 1., 0.), smoothstep(300., 4000., t)*.6));
+      vec3 R = reflect(rd, n); R.y = max(R.y, .002);
+      vec3 refl = skyFull(R, false);
+      float fres = .02 + .98*pow(1. - max(dot(n, -rd), 0.), 5.);
+      float depth = fd.y;
+      // sunlight scattered inside the water: turquoise over shallow sand, deep blue further out
+      vec3 Ein = uSC0*max(uSun.y, 0.) + uAmb*PI;
+      vec3 body = Ein/PI*vec3(.004, .04, .1);
+      vec3 bottom = sandC*.6*exp(-vec3(1.2, .25, .15)*depth*4.);
+      vec3 refr = bottom + body*(1. - exp(-depth*1.2));
+      vec3 colW = mix(refr, refl, fres) + sunSpec(n, rd, .07 + clamp(fp*.02, 0., .16));
+      // light shining through the thin lip of a steepening wave
+      float back = pow(max(dot(rd, uSun), 0.), 3.);
+      colW += (uSC0*back*.14 + uAmb*.4)*vec3(.1, .5, .38)*wv.y;
+
+      // whitewater: texture rides shoreward with the waves
+      vec2 fq = vec2(sa.y*.9, s + uT*3.33);
+      float tex = fbm(fq*1.3 + fbm(fq*.6 + uT*.25, 3)*2., 5);
+      tex = mix(tex, .5, smoothstep(.3, 3., fp));
+      float foam = smoothstep(.28, .62, wv.x*(.3 + tex*1.1));
+      // swash: foamy sheet while the water rushes up, lace while it drains back
+      float uprush = 1. - smoothstep(.05, .4, sw.x);
+      float edgeF = smoothstep(.9, 0., e)*step(0., e);
+      foam = max(foam, smoothstep(.3, .7, (edgeF*(.6 + .6*uprush) + uprush*.5*smoothstep(5., 0., e))*(.4 + tex)));
+      float lace = smoothstep(.5, .6, fbm(xz*vec2(1.3, 2.1) + vec2(0., sw.x*1.5), 4))*smoothstep(25., 0., s);
+      foam = max(foam, lace*.55*(1. - smoothstep(.5, 3., fp)));
+      vec3 foamC = (uSC0*(max(dot(n, uSun), 0.)*.8 + .2)/PI + uAmb*1.05)*.9 + uSC0*back*.02;
+      colW = mix(colW, foamC, foam*.95);
+      col = mix(colS, colW, wm);
+    }
+    // spray thrown up by the crashing lip, glowing when the sun is behind it
+    float mu = dot(rd, uSun);
+    vec3 mistC = uAmb*1.2 + uSC0*hg(mu, .55)*4.*.6;
+    col = mix(col, mistC, 1. - exp(-mist*.6));
+    // haze towards the horizon
+    vec3 hz = skyL(vec3(rd.x, .0015, rd.z)) + uAmb*.1*vec3(.75, .85, 1.2);
+    col = mix(col, hz, 1. - exp(-t/22000.));
+  }
+  // vegetation in front of sand, sea and sky
+  vec2 vq = vec2(fc.x/uRes.y - uCx + .89, 1. - fc.y/uRes.y);
+  if (vq.x < .56 && vq.y > .38 && vq.y < .7) {
+    float pix = 1./uRes.y;
+    float dH = mix(45., 260., smoothstep(-.05, .5, vq.x)), hb = hedgeBottom(vq.x);
+    // soft contact shadow on the sand under the hedge
+    float hk = 1. - smoothstep(.45, .53, vq.x);
+    if (hk > 0. && vq.y > hb - .002) col *= mix(1. - .45*hk, 1., smoothstep(hb - .002, hb + .5*F/dH, vq.y));
+    bool all = uLayer < -.5;     // no second layer available: draw the close bushes here too
+    vec4 b = bushes(vq, rd, pix, false, 0, all ? 3 : 1);
+    col = mix(col, b.rgb, b.a);
+    if (all) { vec4 g = grass(vq, rd, hb, dH, pix, 2.2, hk); col = mix(col, g.rgb, g.a); }
+    if (all && vq.x < .3) {
+      vec4 b2 = bushes(vq, rd, pix, true, 0, 1); col = mix(col, b2.rgb, b2.a);
+      float hk2 = smoothstep(-.2, -.1, vq.x)*smoothstep(.24, .1, vq.x);
+      vec4 g2 = grass(vq, rd, shrubBottom(vq.x), 15., pix, 6.1, hk2); col = mix(col, g2.rgb, g2.a);
+    }
+  }
+  float ang = acos(clamp(dot(rd, uSun), -1., 1.));
+  col += uSC0*(.012*exp(-ang*35.) + .0035*exp(-ang*7.));
+  // starburst glare around a high sun
+  if (uSun.z < 0. && uDay > 0.) {
+    vec2 dp = p - uSun.xy/(-uSun.z)*F;
+    float ra = atan(dp.y, dp.x);
+    float rays = pow(abs(cos(ra*4.)), 40.) + .6*pow(abs(cos(ra*7. + .4)), 60.);
+    col += uSC0*(rays*.03*exp(-length(dp)*6.) + .02*exp(-length(dp)*9.))*uDay;
+  }
+
+  col *= uExp;
+  col = aces(col);
+  float l = dot(col, vec3(.2126, .7152, .0722));
+  col = max(mix(vec3(l), col, uVivid*(1. + .15*uDay)), 0.);
+  col += vec3(.018, -.006, .03)*l*(1. - l);
+  col = pow(col, vec3(1./2.2));
+  col += (h12(fc + fract(uT)*91.) - .5)/255.;
+  outC = vec4(col, 1.);
+}`;
+
+// one WebGL context = its own programs and sky table; the scene and the close bushes each get one
+function initGL(g) {
+  const compile = (type, src) => {
+    const sh = g.createShader(type); g.shaderSource(sh, src); g.compileShader(sh);
+    if (!g.getShaderParameter(sh, g.COMPILE_STATUS)) throw new Error(g.getShaderInfoLog(sh));
+    return sh;
+  };
+  const program = fs => {
+    const p = g.createProgram();
+    g.attachShader(p, compile(g.VERTEX_SHADER, VS)); g.attachShader(p, compile(g.FRAGMENT_SHADER, fs));
+    g.bindAttribLocation(p, 0, "p"); g.linkProgram(p);
+    if (!g.getProgramParameter(p, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(p));
+    const u = {}; const n = g.getProgramParameter(p, g.ACTIVE_UNIFORMS);
+    for (let i = 0; i < n; i++) { const name = g.getActiveUniform(p, i).name; u[name] = g.getUniformLocation(p, name); }
+    return { p, u };
+  };
+  const ctx = { g, lutP: program(LUT_FS), mainP: program(MAIN_FS), lutEl: 99 };
+  const vb = g.createBuffer(); g.bindBuffer(g.ARRAY_BUFFER, vb);
+  g.bufferData(g.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), g.STATIC_DRAW);
+  g.enableVertexAttribArray(0); g.vertexAttribPointer(0, 2, g.FLOAT, false, 0, 0);
+  const floatOK = !!g.getExtension("EXT_color_buffer_float");
+  ctx.lutTex = g.createTexture(); g.bindTexture(g.TEXTURE_2D, ctx.lutTex);
+  if (floatOK) g.texImage2D(g.TEXTURE_2D, 0, g.RGBA16F, LUT_W, LUT_H, 0, g.RGBA, g.HALF_FLOAT, null);
+  else g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, LUT_W, LUT_H, 0, g.RGBA, g.UNSIGNED_BYTE, null);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.LINEAR); g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.LINEAR);
+  g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE); g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
+  ctx.fbo = g.createFramebuffer(); g.bindFramebuffer(g.FRAMEBUFFER, ctx.fbo);
+  g.framebufferTexture2D(g.FRAMEBUFFER, g.COLOR_ATTACHMENT0, g.TEXTURE_2D, ctx.lutTex, 0);
+  g.bindFramebuffer(g.FRAMEBUFFER, null);
+  ctx.ENC = floatOK ? 0 : 1;
+  return ctx;
+}
+const LUT_W = 192, LUT_H = 96;
+function renderLUT(ctx, el) {
+  const g = ctx.g, P = ctx.lutP;
+  g.bindFramebuffer(g.FRAMEBUFFER, ctx.fbo); g.viewport(0, 0, LUT_W, LUT_H);
+  g.useProgram(P.p);
+  g.uniform2f(P.u.uRes, LUT_W, LUT_H); g.uniform1f(P.u.uSunEl, el); g.uniform1f(P.u.uMie, MIE); g.uniform1f(P.u.uEnc, ctx.ENC);
+  g.drawArrays(g.TRIANGLES, 0, 3);
+  g.bindFramebuffer(g.FRAMEBUFFER, null);
+  ctx.lutEl = el;
+}
+let SCENE, VEG = null;
+try { SCENE = initGL(gl); }
+catch (err) { console.error(err); const e = document.getElementById("err"); e.hidden = false; e.textContent = "The beach shader didn't compile on this graphics card. Details are in the browser console."; return; }
+const vegCanvas = document.getElementById("veg");
+try { const g2 = vegCanvas.getContext("webgl2", { antialias: false, alpha: true, premultipliedAlpha: true }); if (g2) VEG = initGL(g2); }
+catch (err) { console.warn("Close bushes fall back to the main layer:", err); VEG = null; }
+
+/* ---------- foreground: palms, bushes, rocks ---------- */
+const fg = document.getElementById("fg"), fg2 = document.getElementById("fg2");
+const fxA = fg.getContext("2d"), fxB = fg2.getContext("2d");
+let fx = fxA;   // the 2D context being drawn into
+const coco = document.getElementById("coco");
+let W = 0, H = 0, DPR = 1, CX = 0.89;
+const HOR = 0.42, FOCAL = 1.15;
+// the rocks change only with the light, so they are drawn into a cached layer
+const backC = document.createElement("canvas"), backX = backC.getContext("2d");
+let cacheT = -1e9, cacheDirty = true;
+
+function rng(seed) { return () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }; }
+function nrm(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
+function viewDir(px, py) { return nrm([px / H - CX, (H - py) / H - HOR, -FOCAL]); }
+
+// Shading for every foreground surface. n is in camera space: x right, y up, z towards the viewer.
+const LEAF_T = [0.2, 0.32, 0.05];   // colour of sunlight passing through a leaf
+function shade(LC, alb, n, o = {}) {
+  const s = LC.sun, nd = n[0]*s[0] + n[1]*s[1] + n[2]*s[2];
+  const k = Math.max(nd, 0) * (o.shadow ?? 1);
+  let tr = 0, sp = 0;
+  if (o.trans) {
+    const rd = o.rd || [0, 0, -1];
+    tr = o.trans * (0.35 * Math.max(-nd, 0) + 1.8 * Math.pow(Math.max(rd[0]*s[0] + rd[1]*s[1] + rd[2]*s[2], 0), o.cone || 6)) * (o.shadow ?? 1);
+  }
+  if (o.gloss) { const h = nrm([s[0], s[1], s[2] + 1]); sp = o.gloss * Math.pow(Math.max(n[0]*h[0] + n[1]*h[1] + n[2]*h[2], 0), o.shine || 30); }
+  const sky = (0.55 + 0.45 * n[1]) * (o.ao ?? 1), out = [0, 0, 0];
+  for (let i = 0; i < 3; i++) out[i] = LC.sc0[i] * (alb[i]*k + LEAF_T[i]*tr + sp) / Math.PI + alb[i]*LC.amb[i]*sky;
+  return out;
+}
+// same tone mapping and grade as the shader, quantised so equal colours can share one path
+function css(LC, c) {
+  const v = c.map(x => aces(x * LC.exp));
+  const l = 0.2126*v[0] + 0.7152*v[1] + 0.0722*v[2], k = LC.vivid * (1 + 0.15 * LC.day), tint = [0.018, -0.006, 0.03];
+  const q = v.map((x, i) => Math.round(255 * Math.pow(Math.min(1, Math.max(0, l + (x - l)*k + tint[i]*l*(1 - l))), 1 / 2.2) / 3) * 3);
+  return `rgb(${q[0]},${q[1]},${q[2]})`;
+}
+
+/* palms */
+const PALMS = [
+  { bx: 0.37, by: 0.58, cx: 0.383, cy: 0.49, bend: 0.004, len: 0.045, w: 0.005, n: 9, ph: 5.0, d: 200 },
+  { bx: 0.30, by: 0.605, cx: 0.33, cy: 0.40, bend: -0.01, len: 0.07, w: 0.007, n: 10, ph: 4.1, d: 120 },
+  { bx: 0.21, by: 0.645, cx: 0.285, cy: 0.23, bend: -0.035, len: 0.12, w: 0.012, n: 12, ph: 2.9, d: 45 },
+  { bx: -0.04, by: 0.63, cx: 0.025, cy: 0.15, bend: 0.06, len: 0.16, w: 0.016, n: 13, ph: 0.3, d: 30 },
+  { bx: 0.05, by: 0.675, cx: 0.185, cy: 0.065, bend: -0.07, len: 0.19, w: 0.018, n: 14, ph: 1.7, nuts: true, d: 25 },
+];
+for (const [pi, P] of PALMS.entries()) {
+  const r = rng(1000 + pi * 77); P.fronds = [];
+  if (P.len > 0.1) for (let i = 0; i < 2; i++)   // dry fronds hanging against the trunk
+    P.fronds.push({ a: (i ? 1.25 : 1.85) + r() * 0.25, l: P.len * (0.6 + r() * 0.2), droop: 3, ph: r() * 6.28, seed: Math.floor(r() * 1e6), face: 0.6, v: 1, dead: true });
+  for (let i = 0; i < P.n; i++) {
+    const base = -Math.PI * (i + 0.5) / P.n + (r() - 0.5) * 0.35;
+    P.fronds.push({ a: base, l: P.len * (0.75 + r() * 0.4), droop: 1.3 + r() * 1.1, ph: r() * 6.28, seed: Math.floor(r() * 1e6), face: -0.4 + r() * 1.3, v: 0.8 + r() * 0.4 });
+  }
+  for (const a of [2.25, 0.85]) P.fronds.push({ a: a + r() * 0.3, l: P.len * 0.7, droop: 2.4, ph: r() * 6.28, seed: Math.floor(r() * 1e6), face: 0.3, v: 0.9 });
+}
+const PALM_ALB = [0.075, 0.12, 0.04], DEAD_ALB = [0.22, 0.15, 0.07], TRUNK_ALB = [0.2, 0.17, 0.14];
+
+/* rocks: jagged black lava, built from many flat faces */
+function makeRock(r, x, y, w, h) {
+  const n = 8 + Math.floor(r() * 6), top = [], skew = (r() - 0.5) * 0.5;
+  for (let i = 0; i <= n; i++) {
+    const s = i / n, ss = Math.min(1, Math.max(0, s + skew * Math.sin(Math.PI * s)));
+    const env = Math.pow(Math.sin(Math.PI * ss), 0.5 + r() * 0.6);
+    top.push([x - w / 2 + w * s + (i > 0 && i < n ? (r() - 0.5) * w / n * 0.8 : 0), y - h * env * (0.5 + r() * 0.65)]);
+  }
+  top[0][1] = y + 0.003; top[n][1] = y + 0.003;
+  const ridge = [x + skew * w * 0.4 + (r() - 0.5) * w * 0.15, y - h * (0.3 + r() * 0.15)];
+  const facets = [];
+  const add = (pts, d, nz, tone) => { const dl = Math.hypot(d[0], d[1]) || 1; facets.push({ pts, n: nrm([d[0] / dl, -d[1] / dl, nz]), tone }); };
+  add([ridge, top[n], [x + w / 2, y + 0.004], [x - w / 2, y + 0.004], top[0]], [0, 1], 2.5, 0.55);
+  for (let i = 0; i < n; i++) {
+    const a = top[i], b = top[i + 1], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+    const f = 0.45 + r() * 0.3;
+    const c = [ridge[0] + (m[0] - ridge[0]) * f + (r() - 0.5) * w * 0.06, ridge[1] + (m[1] - ridge[1]) * f];
+    add([ridge, a, c], [(a[0] + c[0]) / 2 - ridge[0], (a[1] + c[1]) / 2 - ridge[1]], 0.5 + r() * 0.8, 0.7 + r() * 0.6);
+    add([ridge, c, b], [(b[0] + c[0]) / 2 - ridge[0], (b[1] + c[1]) / 2 - ridge[1]], 0.5 + r() * 0.8, 0.7 + r() * 0.6);
+    add([a, b, c], [m[0] - ridge[0], m[1] - ridge[1]], 0.15 + r() * 0.45, 0.7 + r() * 0.6);
+  }
+  return { facets, x, y, w, ph: r() };
+}
+const ROCKS = []; { const r = rng(91);
+  for (const [x, y, w, h] of [[0.41, 0.592, 0.05, 0.02], [0.445, 0.589, 0.075, 0.034], [0.5, 0.588, 0.04, 0.018], [0.535, 0.587, 0.065, 0.027],
+    [0.585, 0.586, 0.035, 0.016], [0.615, 0.585, 0.025, 0.011], [0.645, 0.585, 0.018, 0.007], [0.475, 0.596, 0.035, 0.012],
+    [0.565, 0.592, 0.022, 0.008], [0.68, 0.584, 0.012, 0.005], [0.425, 0.6, 0.02, 0.008]]) ROCKS.push(makeRock(r, x, y, w, h)); }
+ROCKS.sort((a, b) => a.y - b.y);
+const ROCK_ALB = [0.055, 0.05, 0.05];
+
+function resizeFg() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  fg.width = fg2.width = Math.round(W * DPR); fg.height = fg2.height = Math.round(H * DPR);
+  CX = Math.min(0.89, (W / H) * 0.62);
+  cacheDirty = true;
+}
+addEventListener("resize", resizeFg); resizeFg();
+
+function poly(cx, pts, ox) { cx.beginPath(); pts.forEach((p, i) => i ? cx.lineTo((p[0] + ox) * H, p[1] * H) : cx.moveTo((p[0] + ox) * H, p[1] * H)); cx.closePath(); }
+function renderCaches(LC, ox) {
+  if (backC.width !== fg.width || backC.height !== fg.height) { backC.width = fg.width; backC.height = fg.height; }
+  backX.setTransform(DPR, 0, 0, DPR, 0, 0); backX.clearRect(0, 0, W, H);
+  backX.lineJoin = "miter"; backX.lineWidth = 0.6;
+  for (const rk of ROCKS) for (const f of rk.facets) {
+    const c = css(LC, shade(LC, ROCK_ALB.map(a => a * f.tone), f.n, { gloss: 0.6, shine: 24 }));
+    backX.fillStyle = c; backX.strokeStyle = c; poly(backX, f.pts, ox); backX.fill(); backX.stroke();
+  }
+}
+
+let crownPos = [0, 0];
+// Distance haze for a palm, matching the shader's bushes: thin at low sun so silhouettes stay dark.
+function palmHaze(LC, P, px, py) {
+  const rd = viewDir(px, py), sky = scatter(nrm([rd[0], 0.03, rd[2]]), LC.sun).map((v, i) => v + LC.amb[i] * 0.1 * [0.75, 0.85, 1.2][i]);
+  const l = lum(sky), k = 1 + 0.9 * LC.day, g = 1 + 0.9 * LC.day * Math.exp(-l * 2.5);
+  const graded = sky.map(v => Math.max(0, l + (v - l) * k) * g);
+  const amt = 1 - Math.exp(-P.d / (4000 + (1100 - 4000) * LC.day));
+  return c => c.map((v, i) => v * (1 - amt) + graded[i] * amt);
+}
+function drawPalm(P, t, ox, LC) {
+  const u = H, sw = Math.sin(t * 0.45 + P.ph) * 0.004 + Math.sin(t * 1.1 + P.ph * 2) * 0.0015;
+  const bx = (P.bx + ox) * u, by = P.by * u, cx = (P.cx + ox + sw) * u, cy = P.cy * u;
+  const kx = bx + (cx - bx) * 0.5 + P.bend * u, ky = by + (cy - by) * 0.55;
+  const hz = palmHaze(LC, P, cx, (cy + by) / 2), col = (alb, n, o) => css(LC, hz(shade(LC, alb, n, o)));
+  // trunk: rounded shading across it, uneven growth rings along it
+  const L = [], R = [];
+  for (let i = 0; i <= 40; i++) {
+    const s = i / 40, a = 1 - s;
+    const x = a*a*bx + 2*a*s*kx + s*s*cx, y = a*a*by + 2*a*s*ky + s*s*cy;
+    const dx = 2*a*(kx - bx) + 2*s*(cx - kx), dy = 2*a*(ky - by) + 2*s*(cy - ky);
+    const dl = Math.hypot(dx, dy) || 1, w = P.w * u * (1 - 0.45 * s + 0.35 * Math.max(0, 0.08 - s) / 0.08) * 0.5;
+    L.push([x - dy / dl * w, y + dx / dl * w]); R.push([x + dy / dl * w, y - dx / dl * w]);
+  }
+  const m = 20, g = fx.createLinearGradient(L[m][0], L[m][1], R[m][0], R[m][1]);
+  g.addColorStop(0, col(TRUNK_ALB, nrm([-0.9, 0.1, 0.4])));
+  g.addColorStop(0.45, col(TRUNK_ALB, [0, 0.1, 1]));
+  g.addColorStop(1, col(TRUNK_ALB, nrm([0.9, 0.1, 0.4]), { ao: 0.6 }));
+  fx.fillStyle = g; fx.beginPath(); fx.moveTo(L[0][0], L[0][1]);
+  for (const q of L) fx.lineTo(q[0], q[1]);
+  for (let i = R.length - 1; i >= 0; i--) fx.lineTo(R[i][0], R[i][1]);
+  fx.closePath(); fx.fill();
+  if (P.w * u > 5) {
+    const rr = rng(P.ph * 1000 | 0);
+    fx.strokeStyle = col(TRUNK_ALB.map(a => a * 0.5), [0, 0.1, 1]); fx.lineWidth = Math.max(0.6, P.w * u * 0.05);
+    fx.globalAlpha = 0.55; fx.beginPath();
+    for (let i = 1; i < 40; i++) {
+      if (rr() < 0.3) continue;
+      const a = L[i], b = R[i], mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+      fx.moveTo(a[0], a[1]); fx.quadraticCurveTo(mx, my + P.w * u * (0.06 + rr() * 0.12), b[0], b[1]);
+    }
+    fx.stroke(); fx.globalAlpha = 1;
+  }
+  // fronds: ragged leaflets, shaded darker towards the crown and under the fronds above
+  const paths = new Map(), spines = new Map();
+  const pathFor = (c, map = paths) => { let p = map.get(c); if (!p) { p = new Path2D(); map.set(c, p); } return p; };
+  const rdCrown = viewDir(cx, cy), JIT = [0.8, 1, 1.18];
+  for (const f of P.fronds) {
+    const r = rng(f.seed + 1), alb = (f.dead ? DEAD_ALB : PALM_ALB).map(a => a * f.v);
+    let a = f.a + Math.sin(t * 0.8 + f.ph) * (f.dead ? 0.02 : 0.06) + sw * 6;
+    let x = cx, y = cy; const n = 26, step = f.l * u / n, pts = [];
+    for (let k = 0; k <= n; k++) {
+      pts.push([x, y, a]);
+      a += f.droop * Math.cos(a) * (0.6 + Math.sin(t * 1.3 + f.ph) * 0.05) / n * (0.4 + 1.6 * k / n);
+      x += Math.cos(a) * step; y += Math.sin(a) * step;
+    }
+    const under = Math.sin(f.a) > -0.35 ? 0.6 : 1;   // lower fronds sit in the shade of the ones above
+    const cols = [];
+    for (let seg = 0; seg < 3; seg++) for (const upper of [0, 1]) for (const j of JIT) {
+      const ny = (upper ? 0.85 : 0.3) * (1 - 0.45 * seg / 2), ao = [0.5, 0.8, 1][seg] * (upper ? 1 : 0.7);
+      const nn = nrm([Math.cos(pts[seg * 8][2]) * 0.35, ny, f.face + (upper ? 0 : 0.3)]);
+      cols.push(col(alb.map(v => v * j), nn, { trans: f.dead ? 0.15 : 0.5, cone: 12, gloss: f.dead ? 0 : 0.1, shine: 10, ao, shadow: ao * under, rd: rdCrown }));
+    }
+    const rach = pathFor(cols[3 + 1], spines);
+    rach.moveTo(pts[0][0], pts[0][1]); for (const q of pts) rach.lineTo(q[0], q[1] + P.w * u * 0.05);
+    for (let k = 1; k < n; k++) {
+      const [px, py, pa] = pts[k], prog = k / n, seg = Math.min(2, Math.floor(prog * 3));
+      const ll0 = f.l * u * (f.dead ? 0.2 : 0.3) * Math.pow(Math.sin(Math.PI * Math.min(prog * 1.1, 1)), 0.7);
+      for (const side of [-1, 1]) {
+        if (r() < 0.12) { r(); r(); r(); continue; }      // gaps where leaflets are torn off
+        const ll = ll0 * (0.7 + 0.55 * r());
+        let la = pa + side * (0.65 + r() * 0.5) + Math.sin(t * 3 + k * 0.7 + f.ph) * (f.dead ? 0.01 : 0.07);
+        if (f.dead) la = la * 0.4 + Math.PI / 2 * 0.6;
+        const hang = ll * (0.45 + 0.5 * prog);
+        const ex = px + Math.cos(la) * ll, ey = py + Math.sin(la) * ll + hang;
+        const upper = Math.sin(la) < Math.sin(pa) ? 1 : 0;
+        const qx = px + Math.cos(la) * ll * 0.6, qy = py + Math.sin(la) * ll * 0.6 + hang * 0.2;
+        const dl = Math.hypot(ex - px, ey - py) || 1, wd = ll * 0.065, nx = -(ey - py) / dl * wd, ny = (ex - px) / dl * wd;
+        const p = pathFor(cols[(seg * 2 + upper) * 3 + Math.floor(r() * 3)]);
+        p.moveTo(px, py); p.quadraticCurveTo(qx + nx, qy + ny, ex, ey); p.quadraticCurveTo(qx - nx, qy - ny, px, py);
+      }
+    }
+  }
+  for (const [c, p] of paths) { fx.fillStyle = c; fx.fill(p); }
+  fx.lineCap = "round"; fx.lineJoin = "round"; fx.lineWidth = Math.max(0.7, P.w * u * 0.14);
+  for (const [c, p] of spines) { fx.strokeStyle = c; fx.stroke(p); }
+  if (P.nuts) {
+    const rr = 0.0065 * u;
+    for (const [dx, dy] of [[-0.006, 0.011], [0.004, 0.012], [-0.001, 0.018]]) {
+      const x0 = cx + dx * u, y0 = cy + dy * u, gr = fx.createRadialGradient(x0 - rr * 0.35, y0 - rr * 0.4, rr * 0.1, x0, y0, rr);
+      gr.addColorStop(0, col([0.14, 0.13, 0.05], nrm([-0.3, 0.6, 0.7]), { gloss: 0.15 }));
+      gr.addColorStop(1, col([0.07, 0.06, 0.03], [0, -0.3, 1], { ao: 0.5 }));
+      fx.fillStyle = gr; fx.beginPath(); fx.arc(x0, y0, rr, 0, Math.PI * 2); fx.fill();
+    }
+    crownPos = [cx, cy + 0.012 * u];
+  }
+}
+// palms are drawn crisp on a scratch canvas, then laid down very slightly soft like the rest of the scene
+const palmC = document.createElement("canvas"), palmX = palmC.getContext("2d");
+function drawPalmsSoft(target, list, t, ox, LC) {
+  if (palmC.width !== fg.width || palmC.height !== fg.height) { palmC.width = fg.width; palmC.height = fg.height; }
+  palmX.setTransform(1, 0, 0, 1, 0, 0); palmX.clearRect(0, 0, palmC.width, palmC.height); palmX.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const keep = fx; fx = palmX;
+  for (const i of list) drawPalm(PALMS[i], t, ox, LC);
+  fx = keep;
+  target.save(); target.setTransform(1, 0, 0, 1, 0, 0);
+  target.filter = `blur(${(0.55 * H / 1000 * DPR).toFixed(2)}px)`;
+  target.drawImage(palmC, 0, 0); target.restore();
+}
+function drawForeground(t, L) {
+  const LC = { sun: curSun, sc0: L.sc0, amb: L.amb, exp: L.exposure, vivid: S.vivid, day: L.day };
+  const ox = CX - 0.89, u = H, now = performance.now();
+  if (cacheDirty || now - cacheT > 300) { renderCaches(LC, ox); cacheT = now; cacheDirty = false; }
+  // layer under the close bushes: the palms whose trunks run down into the hedge
+  fx = fxA;
+  fx.setTransform(1, 0, 0, 1, 0, 0); fx.clearRect(0, 0, fg.width, fg.height);
+  fx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  drawPalmsSoft(fx, [0, 1, 3], t, ox, LC);
+  // layer above them: the rocks, and the two palms standing on the open sand in front of the hedge
+  fx = fxB;
+  fx.setTransform(1, 0, 0, 1, 0, 0); fx.clearRect(0, 0, fg2.width, fg2.height);
+  fx.drawImage(backC, 0, 0);
+  fx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  drawPalmsSoft(fx, [2, 4], t, ox, LC);
+  fx = fxA;
+  coco.style.transform = `translate(${crownPos[0]}px, ${crownPos[1]}px)`;
+}
+
+/* ---------- UI ---------- */
+const $ = id => document.getElementById(id);
+const panel = $("panel");
+function openMenu(v) {
+  const open = v ?? panel.classList.contains("closed");
+  panel.classList.toggle("closed", !open);
+  if (open) { $("hint").classList.add("gone"); try { localStorage.setItem("sunset-shore-hinted", "1"); } catch (e) {} }
+}
+coco.addEventListener("click", () => openMenu());
+$("close").addEventListener("click", () => openMenu(false));
+
+function fmtRel(m) {
+  const ev = S.mode === "sunset" ? "sunset" : "sunrise";
+  const a = Math.abs(Math.round(m));
+  if (a === 0) return `at ${ev}`;
+  const hh = Math.floor(a / 60), mm = a % 60;
+  const d = hh ? `${hh} h ${String(mm).padStart(2, "0")} min` : `${mm} min`;
+  return `${d} ${m < 0 ? "before" : "after"} ${ev}`;
+}
+function fmtShort(m) { const r = Math.round(m); return (r > 0 ? "+" : r < 0 ? "−" : "") + Math.abs(r) + " min"; }
+function phaseName(el) {
+  const d = el * 180 / Math.PI, set = S.mode === "sunset";
+  if (d > 15) return "Afternoon light";
+  if (d > 6) return "Golden hour";
+  if (d > -0.83) return set ? "Sun going down" : "Sun coming up";
+  if (d > -6) return "Civil twilight · blue hour";
+  if (d > -12) return "Nautical twilight";
+  if (d > -18) return "Astronomical twilight";
+  return "Night";
+}
+function syncControls() {
+  $("m-sunset").setAttribute("aria-pressed", S.mode === "sunset");
+  $("m-sunrise").setAttribute("aria-pressed", S.mode === "sunrise");
+  $("tick-0").textContent = S.mode;
+  for (const b of $("speeds").children) b.setAttribute("aria-pressed", Number(b.dataset.v) === S.speed);
+  $("speed-out").textContent = S.speed === 1 ? "real time" : `${S.speed}× faster`;
+  $("loop").value = S.loop; $("quality").value = S.quality;
+  for (const k of ["clouds", "waves", "vivid"]) { $(k).value = S[k]; $(k + "-out").textContent = Math.round(S[k] * 100) + "%"; }
+  $("play").textContent = S.paused ? "Play" : "Pause";
+  $("linked").checked = S.linked;
+  for (const el of document.querySelectorAll(".clock-ctl")) { el.classList.toggle("locked", S.linked); el.inert = S.linked; }
+  paintTrack();
+}
+let dragging = false;
+const pos = $("pos");
+$("linked").addEventListener("change", e => { S.linked = e.target.checked; if (!S.linked) S.start = Math.round(S.rel); syncControls(); save(true); });
+pos.addEventListener("input", () => { dragging = true; S.rel = S.start = Number(pos.value); $("pos-out").textContent = fmtShort(S.rel); save(true); });
+pos.addEventListener("change", () => { dragging = false; });
+pos.addEventListener("pointerup", () => { dragging = false; });
+$("m-sunset").addEventListener("click", () => { S.mode = "sunset"; S.rel = S.start; syncControls(); save(true); });
+$("m-sunrise").addEventListener("click", () => { S.mode = "sunrise"; S.rel = S.start; syncControls(); save(true); });
+$("speeds").addEventListener("click", e => { const v = e.target.dataset?.v; if (v) { S.speed = Number(v); syncControls(); save(true); } });
+$("loop").addEventListener("change", e => { S.loop = e.target.value; save(true); });
+$("quality").addEventListener("change", e => { S.quality = e.target.value; scale = S.quality === "auto" ? 0.8 : Number(S.quality); save(true); });
+for (const k of ["clouds", "waves", "vivid"]) $(k).addEventListener("input", e => { S[k] = Number(e.target.value); $(k + "-out").textContent = Math.round(S[k] * 100) + "%"; save(); });
+$("play").addEventListener("click", () => { S.paused = !S.paused; syncControls(); save(true); });
+$("restart").addEventListener("click", () => { S.rel = S.start; save(true); });
+function toggleFs() {
+  try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => {}); } catch (e) {}
+}
+$("fs").addEventListener("click", toggleFs);
+addEventListener("keydown", e => {
+  if (e.target.tagName === "SELECT") return;
+  const k = e.key.toLowerCase();
+  if (k === "m") openMenu();
+  else if (k === "escape") openMenu(false);
+  else if (k === "f") toggleFs();
+  else if (S.linked) return;   // following the clock: no pausing or skipping
+  else if (k === " " && e.target.tagName !== "BUTTON" && e.target.tagName !== "INPUT") { S.paused = !S.paused; syncControls(); e.preventDefault(); }
+  else if ((k === "arrowleft" || k === "arrowright") && e.target !== pos) { S.rel += k === "arrowleft" ? -5 : 5; }
+});
+
+// the "play from" track shows the sky colour at each moment
+function paintTrack() {
+  const stops = [];
+  for (let m = -360; m <= 360; m += 15) {
+    const sun = sunDir(S.mode, m), Lg = lighting(sun);
+    const sAz = Math.atan2(sun[0], -sun[2]);
+    const c = scatter(dirAE(sAz, 0.06), sun).map((v, i) => v * 0.6 + Lg.amb[i] * 0.4 + [0.0006, 0.001, 0.0024][i]);
+    stops.push(`${toCss(c, Lg.exposure)} ${((m + 360) / 720 * 100).toFixed(1)}%`);
+  }
+  pos.style.setProperty("--track", `linear-gradient(90deg, ${stops.join(",")})`);
+}
+
+// cursor hides when idle; screen stays awake
+let idleT = 0;
+addEventListener("pointermove", () => { document.body.classList.remove("idle"); idleT = performance.now(); });
+let wake = null;
+async function keepAwake() { try { if ("wakeLock" in navigator && document.visibilityState === "visible") wake = await navigator.wakeLock.request("screen"); } catch (e) {} }
+document.addEventListener("visibilitychange", keepAwake); keepAwake();
+
+try { if (localStorage.getItem("sunset-shore-hinted")) $("hint").classList.add("gone"); } catch (e) {}
+setTimeout(() => $("hint").classList.add("gone"), 9000);
+
+/* ---------- loop ---------- */
+let scale = S.quality === "auto" ? 0.8 : Number(S.quality);
+let last = performance.now(), tReal = 0, frames = 0, frameAcc = 0, uiT = 0, curSun = [0, 0, -1];
+let expSm = null;
+syncControls();
+
+function frame(now) {
+  const dt = Math.min(0.1, (now - last) / 1000); last = now; tReal += dt;
+  if (S.linked) {
+    // beach time = the viewer's clock; face the sunrise before noon and the sunset after
+    const d = new Date(), mins = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60 + d.getMilliseconds() / 60000;
+    const mode = mins < 720 ? "sunrise" : "sunset";
+    if (mode !== S.mode) { S.mode = mode; syncControls(); }
+    S.rel = mins - (mode === "sunset" ? 1080 : 360);
+  } else if (!S.paused && !dragging) {
+    S.rel += dt * S.speed / 60;
+    if (S.loop !== "off" && S.rel > Number(S.loop) && S.start < Number(S.loop)) S.rel = S.start;
+    if (S.rel > 720) S.rel -= 1440;
+  }
+  const sun = sunDir(S.mode, S.rel); curSun = sun;
+  const el = Math.asin(sun[1]);
+  const L = lighting(sun);
+  expSm = expSm == null ? L.exposure : expSm + (L.exposure - expSm) * Math.min(1, dt * 2);
+  L.exposure = expSm;
+
+  // adaptive resolution
+  frames++; frameAcc += dt;
+  if (frameAcc > 1.2) {
+    const ms = frameAcc / frames * 1000; frames = 0; frameAcc = 0;
+    if (S.quality === "auto") {
+      const maxS = Math.min(window.devicePixelRatio || 1, 1.25);
+      if (ms > 24) scale = Math.max(0.4, scale * 0.85);
+      else if (ms < 18) scale = Math.min(maxS, scale * 1.06);
+    }
+  }
+  const cw = Math.max(64, Math.round(innerWidth * scale)), ch = Math.max(64, Math.round(innerHeight * scale));
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+
+  const night = Math.min(1, Math.max(0, (-el * 180 / Math.PI - 2) / 8));
+  const drawPass = (ctx, cv, layer) => {
+    const g = ctx.g, u = ctx.mainP.u;
+    if (Math.abs(el - ctx.lutEl) > 1.5e-4) renderLUT(ctx, el);
+    if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+    g.viewport(0, 0, cw, ch);
+    if (layer > 0) { g.clearColor(0, 0, 0, 0); g.clear(g.COLOR_BUFFER_BIT); }
+    g.useProgram(ctx.mainP.p);
+    g.activeTexture(g.TEXTURE0); g.bindTexture(g.TEXTURE_2D, ctx.lutTex); g.uniform1i(u.uSky, 0);
+    g.uniform2f(u.uRes, cw, ch); g.uniform1f(u.uT, tReal + 40); g.uniform3fv(u.uSun, sun);
+    g.uniform1f(u.uEnc, ctx.ENC);
+    g.uniform3fv(u.uSC0, L.sc0); g.uniform3fv(u.uSC1, L.sc1); g.uniform3fv(u.uSC2, L.sc2); g.uniform3fv(u.uAmb, L.amb);
+    g.uniform1f(u.uExp, L.exposure); g.uniform1f(u.uCloud, S.clouds); g.uniform1f(u.uWave, S.waves); g.uniform1f(u.uVivid, S.vivid);
+    g.uniform1f(u.uNight, night * night * (3 - 2 * night));
+    g.uniform1f(u.uHor, HOR); g.uniform1f(u.uCx, CX); g.uniform1f(u.uDay, L.day); g.uniform1f(u.uLayer, layer);
+    g.drawArrays(g.TRIANGLES, 0, 3);
+  };
+  drawPass(SCENE, canvas, VEG ? 0 : -1);
+  if (VEG) drawPass(VEG, vegCanvas, 1);
+
+  drawForeground(tReal, L);
+
+  if (now - uiT > 250) {
+    uiT = now;
+    if (performance.now() - idleT > 3000 && panel.classList.contains("closed")) document.body.classList.add("idle");
+    if (!panel.classList.contains("closed")) {
+      let h = ((todHours(S.mode, S.rel) % 24) + 24) % 24;
+      const hh = Math.floor(h), mm = Math.floor((h - hh) * 60), ss = Math.floor(((h - hh) * 60 - mm) * 60);
+      $("clock").innerHTML = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}<small>:${String(ss).padStart(2, "0")}</small>`;
+      $("phase").textContent = phaseName(el);
+      $("sub").textContent = `${fmtRel(S.rel)} · sun ${(el * 180 / Math.PI).toFixed(1).replace("-", "−")}°`;
+      if (!dragging) { pos.value = Math.max(-360, Math.min(360, S.rel)); $("pos-out").textContent = fmtShort(S.rel); }
+    }
+    save();
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+
+</html>
