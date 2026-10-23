@@ -445,18 +445,19 @@ vec3 stars(vec3 rd){
 }
 
 // wind moves the cloud field; evo (much slower) reshapes it
-vec4 cloudLayer(vec3 rd, float alt, vec2 scl, float cov, vec2 wind, float evo, vec3 sc, float thick, float seed, vec3 skyc, int oct){
+// lite: one octave less detail, for reflections broken up by ripples anyway
+vec4 cloudLayer(vec3 rd, float alt, vec2 scl, float cov, vec2 wind, float evo, vec3 sc, float thick, float seed, vec3 skyc, int oct, bool lite){
   if (rd.y < -.01 || cov <= .01) return vec4(0.);
   float b = (Re + CAMH)*rd.y; float c = (CAMH - alt)*(2.*Re + CAMH + alt);
   float t = -b + sqrt(b*b - c);
   vec2 p = rd.xz*t/scl + wind*uT + seed;
   float lo = 1. - cov;
   float z = uT*evo + seed;
-  float n = fbmT(p, z, oct);
+  float n = fbmT(p, z, lite ? oct - 1 : oct);
   float d = smoothstep(lo, lo + .28, n);
   if (d <= .002) return vec4(0.);
   vec2 sdir = uSun.xz; float sl = length(sdir); sdir = sl > 1e-4 ? sdir/sl : vec2(0.);
-  float occ = smoothstep(lo, lo + .4, fbmT(p + sdir*.1, z, 4))*.7 + smoothstep(lo, lo + .4, fbmT(p + sdir*.28, z, 3))*.5;
+  float occ = smoothstep(lo, lo + .4, fbmT(p + sdir*.1, z, lite ? 3 : 4))*.7 + smoothstep(lo, lo + .4, fbmT(p + sdir*.28, z, lite ? 2 : 3))*.5;
   float tr = exp(-thick*occ*2.6);
   float mu = dot(rd, uSun);
   float ph = mix(hg(mu, .6), hg(mu, -.15), .35)*4.*PI;
@@ -474,7 +475,7 @@ float ridge(vec3 rd){
   return .017*smoothstep(-.5, -.3, ax)*(1. - smoothstep(-.17, -.03, ax))*(.72 + .28*vn(vec2(ax*45., 2.)));
 }
 
-vec3 skyFull(vec3 rd, bool disk){
+vec3 skyFull(vec3 rd, bool disk, bool refl){
   vec3 base = skyL(rd) + uAmb*.1*(1. - .8*uDay)*vec3(.75, .85, 1.2) + vec3(.0006, .001, .0024)*(1.2 - rd.y);
   vec3 col = base;
   col += stars(rd)*uNight*smoothstep(0., .12, rd.y);
@@ -482,9 +483,9 @@ vec3 skyFull(vec3 rd, bool disk){
     float cs = dot(rd, uSun); const float sr = .0105;
     col += uSC0*smoothstep(cos(sr), cos(sr*.8), cs)*25.;
   }
-  vec4 c2 = cloudLayer(rd, 7500., vec2(15000., 5500.), uCloud*.72, vec2(.0018, .0005), .0025, uSC2, .5, 11.3, base, 5);
+  vec4 c2 = cloudLayer(rd, 7500., vec2(15000., 5500.), uCloud*.72, vec2(.0018, .0005), .0025, uSC2, .5, 11.3, base, 5, refl);
   col = col*(1. - c2.a) + c2.rgb;
-  vec4 c1 = cloudLayer(rd, 2000., vec2(3200.), uCloud, vec2(.0032, .0009), .0055, uSC1, 1., 3.1, base, 6);
+  vec4 c1 = cloudLayer(rd, 2000., vec2(3200.), uCloud, vec2(.0032, .0009), .0055, uSC1, 1., 3.1, base, 6, refl);
   col = col*(1. - c1.a) + c1.rgb;
   float rg = ridge(rd);
   if (rd.y < rg) {
@@ -763,7 +764,7 @@ void main(){
   float pixA = 1./(uRes.y*F);
   vec3 col;
   if (rd.y >= 0.) {
-    col = skyFull(rd, true);
+    col = skyFull(rd, true, false);
   } else {
     // march the waves near the shore; far out the sea is treated as flat
     float camY = CAMH + max(0., sandY(shore(vec2(0.)).x));
@@ -821,7 +822,7 @@ void main(){
       vec3 nw = normalize(vec3(gn.x, 1., gn.y));
       vec3 Rw = reflect(rd, nw); Rw.y = max(Rw.y, .002);
       float fw = .02 + .98*pow(1. - max(dot(nw, -rd), 0.), 5.);
-      colS = mix(sandC, skyFull(Rw, false), fw*gloss*.92) + sunSpec(nw, rd, mix(.3, .1, filmF))*gloss*.6;
+      colS = mix(sandC, skyFull(Rw, false, true), fw*gloss*.92) + sunSpec(nw, rd, mix(.3, .1, filmF))*gloss*.6;
     }
     // the last swash line: a soft rim of fine foam on darker sand
     float mk = hist.z*(1. - .6*smoothstep(.2, 1.5, fp));
@@ -847,7 +848,7 @@ void main(){
       vec3 n = normalize(vec3(h0 - surfaceH(xz + vec2(ee, 0.), fp), ee, h0 - surfaceH(xz + vec2(0., ee), fp)));
       n = normalize(mix(n, vec3(0., 1., 0.), smoothstep(300., 4000., t)*.6));
       vec3 R = reflect(rd, n); R.y = max(R.y, .002);
-      vec3 refl = skyFull(R, false);
+      vec3 refl = skyFull(R, false, true);
       float fres = .02 + .98*pow(1. - max(dot(n, -rd), 0.), 5.);
       float depth = fd.y;
       // sunlight scattered inside the water: turquoise over shallow sand, deep blue further out
@@ -979,7 +980,7 @@ let W = 0, H = 0, DPR = 1, CX = 0.89;
 const HOR = 0.42, FOCAL = 1.15;
 // the rocks change only with the light, so they are drawn into a cached layer
 const backC = document.createElement("canvas"), backX = backC.getContext("2d");
-let cacheT = -1e9, cacheDirty = true;
+let cacheDirty = true, rockKey = "", rockT = -1e9;
 
 function rng(seed) { return () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }; }
 function nrm(v) { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; }
@@ -1091,7 +1092,11 @@ function drawPalm(P, t, ox, LC) {
   const u = H, sw = Math.sin(t * 0.45 + P.ph) * 0.004 + Math.sin(t * 1.1 + P.ph * 2) * 0.0015;
   const bx = (P.bx + ox) * u, by = P.by * u, cx = (P.cx + ox + sw) * u, cy = P.cy * u;
   const kx = bx + (cx - bx) * 0.5 + P.bend * u, ky = by + (cy - by) * 0.55;
-  const hz = palmHaze(LC, P, cx, (cy + by) / 2), col = (alb, n, o) => css(LC, hz(shade(LC, alb, n, o)));
+  const fresh = P.ck !== LC.key;
+  if (fresh) { P.ck = LC.key; P.hz = palmHaze(LC, P, cx, (cy + by) / 2); }
+  const hz = P.hz, col = (alb, n, o) => css(LC, hz(shade(LC, alb, n, o)));
+  if (fresh) P.tc = [col(TRUNK_ALB, nrm([-0.9, 0.1, 0.4])), col(TRUNK_ALB, [0, 0.1, 1]), col(TRUNK_ALB, nrm([0.9, 0.1, 0.4]), { ao: 0.6 }),
+    col(TRUNK_ALB.map(a => a * 0.5), [0, 0.1, 1]), col([0.14, 0.13, 0.05], nrm([-0.3, 0.6, 0.7]), { gloss: 0.15 }), col([0.07, 0.06, 0.03], [0, -0.3, 1], { ao: 0.5 })];
   // trunk: rounded shading across it, uneven growth rings along it
   const L = [], R = [];
   for (let i = 0; i <= 40; i++) {
@@ -1102,16 +1107,14 @@ function drawPalm(P, t, ox, LC) {
     L.push([x - dy / dl * w, y + dx / dl * w]); R.push([x + dy / dl * w, y - dx / dl * w]);
   }
   const m = 20, g = fx.createLinearGradient(L[m][0], L[m][1], R[m][0], R[m][1]);
-  g.addColorStop(0, col(TRUNK_ALB, nrm([-0.9, 0.1, 0.4])));
-  g.addColorStop(0.45, col(TRUNK_ALB, [0, 0.1, 1]));
-  g.addColorStop(1, col(TRUNK_ALB, nrm([0.9, 0.1, 0.4]), { ao: 0.6 }));
+  g.addColorStop(0, P.tc[0]); g.addColorStop(0.45, P.tc[1]); g.addColorStop(1, P.tc[2]);
   fx.fillStyle = g; fx.beginPath(); fx.moveTo(L[0][0], L[0][1]);
   for (const q of L) fx.lineTo(q[0], q[1]);
   for (let i = R.length - 1; i >= 0; i--) fx.lineTo(R[i][0], R[i][1]);
   fx.closePath(); fx.fill();
   if (P.w * u > 5) {
     const rr = rng(P.ph * 1000 | 0);
-    fx.strokeStyle = col(TRUNK_ALB.map(a => a * 0.5), [0, 0.1, 1]); fx.lineWidth = Math.max(0.6, P.w * u * 0.05);
+    fx.strokeStyle = P.tc[3]; fx.lineWidth = Math.max(0.6, P.w * u * 0.05);
     fx.globalAlpha = 0.55; fx.beginPath();
     for (let i = 1; i < 40; i++) {
       if (rr() < 0.3) continue;
@@ -1134,8 +1137,9 @@ function drawPalm(P, t, ox, LC) {
       x += Math.cos(a) * step; y += Math.sin(a) * step;
     }
     const under = Math.sin(f.a) > -0.35 ? 0.6 : 1;   // lower fronds sit in the shade of the ones above
-    const cols = [];
-    for (let seg = 0; seg < 3; seg++) for (const upper of [0, 1]) for (const j of JIT) {
+    if (fresh || !f.cols) f.cols = [];
+    const cols = f.cols;
+    if (!cols.length) for (let seg = 0; seg < 3; seg++) for (const upper of [0, 1]) for (const j of JIT) {
       const ny = (upper ? 0.85 : 0.3) * (1 - 0.45 * seg / 2), ao = [0.5, 0.8, 1][seg] * (upper ? 1 : 0.7);
       const nn = nrm([Math.cos(pts[seg * 8][2]) * 0.35, ny, f.face + (upper ? 0 : 0.3)]);
       cols.push(col(alb.map(v => v * j), nn, { trans: f.dead ? 0.15 : 0.5, cone: 12, gloss: f.dead ? 0 : 0.1, shine: 10, ao, shadow: ao * under, rd: rdCrown }));
@@ -1167,8 +1171,7 @@ function drawPalm(P, t, ox, LC) {
     const rr = 0.0065 * u;
     for (const [dx, dy] of [[-0.006, 0.011], [0.004, 0.012], [-0.001, 0.018]]) {
       const x0 = cx + dx * u, y0 = cy + dy * u, gr = fx.createRadialGradient(x0 - rr * 0.35, y0 - rr * 0.4, rr * 0.1, x0, y0, rr);
-      gr.addColorStop(0, col([0.14, 0.13, 0.05], nrm([-0.3, 0.6, 0.7]), { gloss: 0.15 }));
-      gr.addColorStop(1, col([0.07, 0.06, 0.03], [0, -0.3, 1], { ao: 0.5 }));
+      gr.addColorStop(0, P.tc[4]); gr.addColorStop(1, P.tc[5]);
       fx.fillStyle = gr; fx.beginPath(); fx.arc(x0, y0, rr, 0, Math.PI * 2); fx.fill();
     }
     crownPos = [cx, cy + 0.012 * u];
@@ -1176,31 +1179,36 @@ function drawPalm(P, t, ox, LC) {
 }
 // palms are drawn crisp on a scratch canvas, then laid down very slightly soft like the rest of the scene
 const palmC = document.createElement("canvas"), palmX = palmC.getContext("2d");
-function drawPalmsSoft(target, list, t, ox, LC) {
+function drawPalmsSoft(target, list, t, ox, LC, cropW) {
   if (palmC.width !== fg.width || palmC.height !== fg.height) { palmC.width = fg.width; palmC.height = fg.height; }
-  palmX.setTransform(1, 0, 0, 1, 0, 0); palmX.clearRect(0, 0, palmC.width, palmC.height); palmX.setTransform(DPR, 0, 0, DPR, 0, 0);
+  palmX.setTransform(1, 0, 0, 1, 0, 0); palmX.clearRect(0, 0, cropW, palmC.height); palmX.setTransform(DPR, 0, 0, DPR, 0, 0);
   const keep = fx; fx = palmX;
   for (const i of list) drawPalm(PALMS[i], t, ox, LC);
   fx = keep;
   target.save(); target.setTransform(1, 0, 0, 1, 0, 0);
   target.filter = `blur(${(0.55 * H / 1000 * DPR).toFixed(2)}px)`;
-  target.drawImage(palmC, 0, 0); target.restore();
+  target.drawImage(palmC, 0, 0, cropW, palmC.height, 0, 0, cropW, palmC.height); target.restore();
 }
 function drawForeground(t, L) {
   const LC = { sun: curSun, sc0: L.sc0, amb: L.amb, exp: L.exposure, vivid: S.vivid, day: L.day };
-  const ox = CX - 0.89, u = H, now = performance.now();
-  if (cacheDirty || now - cacheT > 300) { renderCaches(LC, ox); cacheT = now; cacheDirty = false; }
+  // colours only change when the light does; this key tells the caches when to refresh
+  LC.key = `${L.el.toFixed(6)}|${Math.log(L.exposure).toFixed(3)}|${S.vivid}|${W}x${H}`;
+  const ox = CX - 0.89, u = H;
+  const now = performance.now(), rocksNew = cacheDirty || (LC.key !== rockKey && now - rockT > 250);
+  if (rocksNew) { renderCaches(LC, ox); rockKey = LC.key; rockT = now; cacheDirty = false; }
+  const cropW = Math.max(1, Math.min(fg.width, Math.ceil((0.52 + ox) * H * DPR)));   // the palms never reach further right
   // layer under the close bushes: the palms whose trunks run down into the hedge
   fx = fxA;
-  fx.setTransform(1, 0, 0, 1, 0, 0); fx.clearRect(0, 0, fg.width, fg.height);
+  fx.setTransform(1, 0, 0, 1, 0, 0); fx.clearRect(0, 0, cropW, fg.height);
   fx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  drawPalmsSoft(fx, [0, 1, 3], t, ox, LC);
+  drawPalmsSoft(fx, [0, 1, 3], t, ox, LC, cropW);
   // layer above them: the rocks, and the two palms standing on the open sand in front of the hedge
   fx = fxB;
-  fx.setTransform(1, 0, 0, 1, 0, 0); fx.clearRect(0, 0, fg2.width, fg2.height);
-  fx.drawImage(backC, 0, 0);
+  fx.setTransform(1, 0, 0, 1, 0, 0);
+  if (rocksNew) { fx.clearRect(0, 0, fg2.width, fg2.height); fx.drawImage(backC, 0, 0); }
+  else { fx.clearRect(0, 0, cropW, fg2.height); fx.drawImage(backC, 0, 0, cropW, fg2.height, 0, 0, cropW, fg2.height); }
   fx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  drawPalmsSoft(fx, [2, 4], t, ox, LC);
+  drawPalmsSoft(fx, [2, 4], t, ox, LC, cropW);
   fx = fxA;
   coco.style.transform = `translate(${crownPos[0]}px, ${crownPos[1]}px)`;
 }
@@ -1305,7 +1313,16 @@ let last = performance.now(), tReal = 0, frames = 0, frameAcc = 0, uiT = 0, curS
 let expSm = null;
 syncControls();
 
+// On 120 Hz+ screens draw every 2nd (or 3rd) refresh: nothing here moves fast enough to need more than ~60 fps.
+let skip = 1, tick = 0, lastRaw = null, Lc = null;
+const ivals = [];
 function frame(now) {
+  if (lastRaw != null && ivals.length < 40) {
+    ivals.push(now - lastRaw);
+    if (ivals.length === 40) skip = Math.max(1, Math.floor(1000 / [...ivals].sort((a, b) => a - b)[20] / 55));
+  }
+  lastRaw = now;
+  if (++tick % skip) { requestAnimationFrame(frame); return; }
   const dt = Math.min(0.1, (now - last) / 1000); last = now; tReal += dt;
   if (S.linked) {
     // beach time = the viewer's clock; face the sunrise before noon and the sunset after
@@ -1320,7 +1337,10 @@ function frame(now) {
   }
   const sun = sunDir(S.mode, S.rel); curSun = sun;
   const el = Math.asin(sun[1]);
-  const L = lighting(sun);
+  // the light only needs recomputing once the sun has actually moved
+  if (!Lc || Math.abs(el - Lc.el) > 2e-5) { Lc = lighting(sun); Lc.el = el; Lc.mie = MIE; }
+  MIE = Lc.mie;   // the menu's colour strip also calls lighting(), which changes MIE
+  const L = { ...Lc };
   expSm = expSm == null ? L.exposure : expSm + (L.exposure - expSm) * Math.min(1, dt * 2);
   L.exposure = expSm;
 
@@ -1343,7 +1363,13 @@ function frame(now) {
     if (Math.abs(el - ctx.lutEl) > 1.5e-4) renderLUT(ctx, el);
     if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
     g.viewport(0, 0, cw, ch);
-    if (layer > 0) { g.clearColor(0, 0, 0, 0); g.clear(g.COLOR_BUFFER_BIT); }
+    if (layer > 0) {
+      // the close bushes only ever cover this band, so the second layer skips the rest of the screen
+      const x1 = Math.min(cw, Math.ceil((0.56 + CX - 0.89) * ch) + 2), y0 = Math.max(0, Math.floor(0.28 * ch) - 2), y1 = Math.min(ch, Math.ceil(0.62 * ch) + 2);
+      if (x1 <= 0) return;
+      g.enable(g.SCISSOR_TEST); g.scissor(0, y0, x1, y1 - y0);
+      g.clearColor(0, 0, 0, 0); g.clear(g.COLOR_BUFFER_BIT);
+    }
     g.useProgram(ctx.mainP.p);
     g.activeTexture(g.TEXTURE0); g.bindTexture(g.TEXTURE_2D, ctx.lutTex); g.uniform1i(u.uSky, 0);
     g.uniform2f(u.uRes, cw, ch); g.uniform1f(u.uT, tReal + 40); g.uniform3fv(u.uSun, sun);
@@ -1353,6 +1379,7 @@ function frame(now) {
     g.uniform1f(u.uNight, night * night * (3 - 2 * night));
     g.uniform1f(u.uHor, HOR); g.uniform1f(u.uCx, CX); g.uniform1f(u.uDay, L.day); g.uniform1f(u.uLayer, layer);
     g.drawArrays(g.TRIANGLES, 0, 3);
+    g.disable(g.SCISSOR_TEST);
   };
   drawPass(SCENE, canvas, VEG ? 0 : -1);
   if (VEG) drawPass(VEG, vegCanvas, 1);
